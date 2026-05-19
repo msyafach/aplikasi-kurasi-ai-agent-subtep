@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Verifikasi Gambar</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="page">
+      <header class="header">
+        <div>
+          <h1>Verifikasi Gambar</h1>
+          <p id="currentCsv" class="muted">CSV: {{ config.csv_path }}</p>
+        </div>
+        <div class="summary">
+          <span>Approved: <strong id="countKeep">0</strong></span>
+          <span>Rejected: <strong id="countDeleted">0</strong></span>
+          <span>Skip: <strong id="countSkipped">0</strong></span>
+          <span>Raw: <strong id="countRaw">0</strong></span>
+        </div>
+      </header>
+
+      <section class="dataset-bar">
+        <label>
+          Dataset
+          <select id="datasetSelect"></select>
+        </label>
+        <label class="path-field">
+          Path CSV
+          <input id="datasetPath" type="text" spellcheck="false" placeholder="Pilih dari dropdown atau upload file...">
+        </label>
+        <label>
+          Format
+          <select id="formatPreset">
+            <option value="">-- pilih format --</option>
+          </select>
+        </label>
+        <label>
+          Kolom gambar
+          <select id="urlColumnSelect"></select>
+        </label>
+        <label>
+          Kolom label
+          <select id="labelColumnSelect"></select>
+        </label>
+        <label id="agentKeyColLabel" hidden>
+          Kolom agent key
+          <select id="agentKeyColSelect"></select>
+        </label>
+        <button type="button" id="loadDataset" class="secondary">Muat Path</button>
+        <label class="upload-label">
+          <span class="secondary-btn-look">&#128194; Upload CSV</span>
+          <input type="file" id="uploadFile" accept=".csv" style="display:none">
+        </label>
+        <button type="button" id="resetReview" class="secondary">Reset</button>
+        <button type="button" id="resetAndDeleteOutputs" class="secondary danger-outline">Reset + Hapus Output</button>
+      </section>
+
+
+      <section class="finetune-bar">
+        <label>
+          Agent key <span class="required-star">*</span>
+          <select id="agentKeySelect"></select>
+        </label>
+        <button type="button" id="loadAgent" class="secondary">Tandai Agent</button>
+        <span id="agentRequiredHint" class="agent-required-hint" hidden>Pilih dan tandai agent key terlebih dahulu sebelum melanjutkan.</span>
+      </section>
+
+      <section class="export-bar">
+        <label>
+          Export data
+          <select id="exportScope">
+            <option value="labeled">Labeled (Approved+Rejected)</option>
+            <option value="approved">Approved saja</option>
+            <option value="rejected">Rejected saja</option>
+            <option value="skip">Skip</option>
+            <option value="raw">Raw belum diulas</option>
+            <option value="reviewed">Reviewed (termasuk Skip)</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <label>
+          Format
+          <select id="exportFormat">
+            <option value="json_labelling">JSON siap labelling</option>
+            <option value="test_reason_json">JSON test reason</option>
+            <option value="data_train_reviewed" id="exportOptDataTrain" hidden>Data Train (reviewed CSV)</option>
+            <option value="raw">Raw file</option>
+            <option value="raw_json">Raw JSON flat</option>
+          </select>
+        </label>
+        <label>
+          Preview
+          <select id="previewLimit">
+            <option value="1">1 item</option>
+            <option value="3" selected>3 item</option>
+            <option value="5">5 item</option>
+          </select>
+        </label>
+        <button type="button" id="previewExport" class="secondary">Preview</button>
+        <button type="button" id="exportData" class="secondary">Export</button>
+      </section>
+
+      <section id="previewPanel" class="preview-panel" hidden>
+        <div class="preview-header">
+          <strong id="previewTitle">Preview</strong>
+          <button type="button" id="closePreview" class="secondary">Tutup</button>
+        </div>
+        <pre id="previewContent"></pre>
+      </section>
+
+      <section class="filter-bar">
+        <label>
+          Filter status
+          <select id="filterScope">
+            <option value="">Semua</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="skip">Skip</option>
+          </select>
+        </label>
+        <label class="filter-checkbox-label">
+          <input type="checkbox" id="filterNoCategory">
+          Kategori kosong saja
+        </label>
+        <button type="button" id="applyFilter" class="secondary">Terapkan Filter</button>
+        <button type="button" id="resumeLabeling" class="secondary">&#8617; Kembali ke Progress Sekarang</button>
+        <button type="button" id="clearFilter" class="secondary" hidden>Keluar Filter</button>
+        <span id="filterStatus" class="muted"></span>
+      </section>
+
+      <section class="progress-block">
+        <progress id="progress" value="0" max="1"></progress>
+        <span id="indexLabel">0 / 0</span>
+      </section>
+
+      <section class="content">
+        <div class="image-panel">
+          <img id="vehicleImage" alt="Foto kendaraan">
+          <div id="imageError" class="image-error" hidden>
+            Gagal memuat gambar.
+            <button type="button" id="retryImage" class="secondary">Coba Lagi</button>
+          </div>
+        </div>
+
+        <aside class="info-panel">
+          <dl>
+            <dt>Status ulasan</dt>
+            <dd id="reviewStatus">-</dd>
+            <dt class="dashboard-field">Nopol</dt>
+            <dd id="nopol" class="dashboard-field">-</dd>
+            <dt>Status</dt>
+            <dd id="label">-</dd>
+            <dt id="groundTruthTitle" hidden>Ground Truth</dt>
+            <dd id="groundTruth" hidden>-</dd>
+            <dt class="dashboard-field">Alasan</dt>
+            <dd id="reason" class="dashboard-field">-</dd>
+            <dt id="categoryTitle" hidden>Category</dt>
+            <dd id="categoryEditor" hidden>
+              <input id="categoryInput" type="text" list="categoryList" placeholder="Ketik atau pilih kategori..." autocomplete="off" spellcheck="false">
+              <datalist id="categoryList"></datalist>
+            </dd>
+            <dt id="descriptionTitle" hidden>Description</dt>
+            <dd id="descriptionEditor" hidden>
+              <select id="descriptionSelect"></select>
+              <textarea id="descriptionText" rows="5" spellcheck="false"></textarea>
+            </dd>
+            <dt id="expectedTitle" hidden>Expected</dt>
+            <dd id="expectedEditor" hidden>
+              <select id="expectedSelect">
+                <option value="APPROVED">APPROVED</option>
+                <option value="REJECTED">REJECTED</option>
+                <option value="SKIP">SKIP</option>
+              </select>
+            </dd>
+            <dt id="reviewerNotesTitle" hidden>Catatan Reviewer</dt>
+            <dd id="reviewerNotesEditor" hidden>
+              <textarea id="reviewerNotesText" rows="3" spellcheck="false" placeholder="Catatan opsional..."></textarea>
+            </dd>
+
+            <dt class="dashboard-field">URL</dt>
+            <dd class="dashboard-field"><a id="sourceUrl" href="#" target="_blank" rel="noreferrer">-</a></dd>
+            <dt class="dashboard-field">STNK Reading</dt>
+            <dd class="dashboard-field"><div id="stnkReading" class="reading-grid"></div></dd>
+            <dt class="dashboard-field">Vehicle Reading</dt>
+            <dd class="dashboard-field"><div id="vehicleReading" class="reading-grid"></div></dd>
+          </dl>
+          <dl id="extraDataContainer" hidden></dl>
+        </aside>
+      </section>
+
+      <section class="actions">
+        <button type="button" data-action="back" class="secondary">Back</button>
+        <button type="button" data-action="approve">APPROVED</button>
+        <button type="button" data-action="reject" class="danger">REJECTED</button>
+        <button type="button" data-action="skip" class="secondary">Skip</button>
+        <button type="button" data-action="save" class="secondary">Simpan</button>
+        <button type="button" data-action="stop" class="secondary">Stop & Simpan</button>
+        <button type="button" id="continueBtn" class="secondary" hidden>Lanjutkan</button>
+      </section>
+
+      <section id="message" class="message" aria-live="polite"></section>
+    </main>
+
+    <script>
+      window.APP_CONFIG = {
+        startIndex: {{ config.start_index | tojson }},
+        dataset: {{ config.dataset | tojson }}
+      };
+    </script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

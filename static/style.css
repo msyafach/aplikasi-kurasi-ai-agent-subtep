@@ -1,0 +1,420 @@
+:root {
+  color-scheme: light;
+  --bg: #f7f7f7;
+  --panel: #ffffff;
+  --border: #d8d8d8;
+  --text: #202020;
+  --muted: #666666;
+  --primary: #2454a6;
+  --danger: #a52a2a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 15px;
+}
+
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.header,
+.content,
+.actions,
+.progress-block,
+.dataset-bar,
+.finetune-bar,
+.export-bar,
+.filter-bar {
+  display: flex;
+  gap: 16px;
+}
+
+.header {
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+h1 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.muted {
+  margin: 0;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+  min-width: 260px;
+}
+
+.dataset-bar,
+.finetune-bar,
+.export-bar,
+.filter-bar {
+  align-items: end;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.filter-bar {
+  background: #fffbf0;
+  border-color: #e0c060;
+}
+
+.dataset-bar label,
+.finetune-bar label,
+.export-bar label,
+.filter-bar label {
+  display: grid;
+  gap: 5px;
+  min-width: 180px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dataset-bar .path-field,
+.finetune-bar .path-field,
+.export-bar .path-field {
+  flex: 1;
+  min-width: 280px;
+}
+
+select,
+input,
+textarea {
+  width: 100%;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #ffffff;
+  color: var(--text);
+  font: inherit;
+}
+
+select,
+input {
+  height: 36px;
+}
+
+textarea {
+  min-height: 92px;
+  padding-top: 8px;
+  resize: vertical;
+}
+
+.progress-block {
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+progress {
+  width: 100%;
+  height: 18px;
+}
+
+#indexLabel {
+  min-width: 92px;
+  text-align: right;
+}
+
+.content {
+  align-items: flex-start;
+}
+
+.image-panel,
+.info-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.image-panel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 760px);
+  min-height: 520px;
+  padding: 12px;
+}
+
+#vehicleImage {
+  display: block;
+  max-width: 100%;
+  max-height: 700px;
+  object-fit: contain;
+}
+
+.image-error {
+  color: var(--danger);
+}
+
+.image-error:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.image-error button {
+  min-width: 80px;
+  height: 30px;
+  font-size: 13px;
+}
+
+.info-panel {
+  flex: 1;
+  min-width: 320px;
+  padding: 16px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+dl {
+  margin: 0;
+}
+
+dt {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+dt:first-child {
+  margin-top: 0;
+}
+
+dd {
+  margin: 4px 0 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+#categoryInput {
+  height: 36px;
+}
+
+.required-star {
+  color: var(--danger);
+}
+
+.filter-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-end;
+  padding-bottom: 8px;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filter-checkbox-label input[type="checkbox"] {
+  width: auto;
+  height: auto;
+  cursor: pointer;
+}
+
+.agent-required-hint {
+  align-self: center;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.agent-required-pulse {
+  animation: pulse-border 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(36, 84, 166, 0.5); }
+  50%       { box-shadow: 0 0 0 4px rgba(36, 84, 166, 0); }
+}
+
+.reading-grid {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(120px, 1fr);
+  gap: 6px 10px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.reading-key {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.reading-value {
+  font-weight: 600;
+}
+
+.reading-empty {
+  color: var(--muted);
+}
+
+a {
+  color: var(--primary);
+}
+
+.actions {
+  flex-wrap: wrap;
+  margin-top: 16px;
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -10px 20px var(--bg);
+  z-index: 100;
+}
+
+button {
+  min-width: 110px;
+  height: 38px;
+  border: 1px solid var(--primary);
+  border-radius: 5px;
+  background: var(--primary);
+  color: #ffffff;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #ffffff;
+  color: var(--text);
+  border-color: var(--border);
+}
+
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+button.danger-outline {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* File upload styled as a secondary button */
+.upload-label {
+  display: flex;
+  align-items: flex-end;
+}
+
+.secondary-btn-look {
+  display: inline-flex;
+  align-items: center;
+  min-width: 110px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #ffffff;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.secondary-btn-look:hover {
+  background: #f0f0f0;
+}
+
+.message {
+  min-height: 24px;
+  margin-top: 14px;
+  color: var(--muted);
+}
+
+.preview-panel {
+  margin-bottom: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+#previewContent {
+  max-height: 360px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 900px) {
+  .header,
+  .content,
+  .dataset-bar,
+  .finetune-bar,
+  .export-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .summary {
+    justify-content: flex-start;
+    min-width: 0;
+  }
+
+  .image-panel {
+    width: 100%;
+    min-height: 360px;
+  }
+
+  .info-panel {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .dataset-bar label,
+  .dataset-bar .path-field,
+  .finetune-bar label,
+  .finetune-bar .path-field,
+  .export-bar label,
+  .export-bar .path-field {
+    min-width: 0;
+  }
+}
