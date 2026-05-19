@@ -55,15 +55,17 @@ Buka browser ke `http://127.0.0.1:5000`.
   - *Data Dashboard (kendaraan)* — kolom `Foto Kendaraan` + `Status`
   - *Data Train* — kolom `url` + `reviewer_label`
   - *Custom* — pilih kolom secara manual.
+- Jika dataset memiliki kolom `agent_key` (seperti format *Data Train*), petakan kolom tersebut di form load dataset. Aplikasi akan membaca agent key otomatis dari setiap baris data.
 
-### 2. Pilih Agent Key
+### 2. Pilih Agent Key (jika belum ada di data)
 
-Sebelum mulai anotasi, pilih **Agent Key** yang sesuai dengan tipe data:
+Langkah ini **hanya diperlukan** jika dataset tidak memiliki kolom `agent_key` (misalnya format *Data Dashboard*).
 
-- `carphoto.*` — untuk data foto kendaraan
-- `ocr_stnk.*` — untuk data foto STNK
+- Pilih agent key yang sesuai via UI sebelum mulai anotasi:
+  - `carphoto.*` — untuk data foto kendaraan
+  - `ocr_stnk.*` — untuk data foto STNK
 
-Agent key menentukan kelompok kategori penolakan yang ditampilkan.
+Agent key menentukan kelompok kategori penolakan yang ditampilkan dan digunakan saat export `json_labelling`.
 
 ### 3. Tinjau Setiap Gambar
 
