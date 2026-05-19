@@ -110,12 +110,111 @@ Setelah selesai anotasi, klik **Export** dan pilih:
 
 Format export yang tersedia:
 
-| Format | Keterangan |
-|---|---|
-| `json_labelling` | JSON terstruktur per group/agent, siap untuk finetuning |
-| `raw` | CSV/JSON mentah sesuai mode dataset |
-| `test_reason_json` | JSON lengkap dengan kode penolakan, untuk evaluasi model |
-| `data_train_reviewed` | CSV dengan kolom label yang sudah diupdate hasil review |
+---
+
+#### `json_labelling` — JSON terstruktur per group/agent
+
+Format utama untuk **finetuning model AI**. Record dikelompokkan berdasarkan `group_key` dan `agent_key` sehingga langsung bisa dikonsumsi pipeline training.
+
+Setiap record hanya memuat 4 field inti:
+
+```json
+{
+  "foto_kendaraan": {
+    "carphoto.vehicle_verification": [
+      {
+        "url": "https://...",
+        "expected": "APPROVED",
+        "category": "",
+        "description": "Foto LOLOS verifikasi"
+      },
+      {
+        "url": "https://...",
+        "expected": "REJECTED",
+        "category": "Nopol tidak cocok",
+        "description": "Nomor polisi pada foto berbeda dengan data"
+      }
+    ]
+  }
+}
+```
+
+> Jika data tidak memiliki `agent_key`, output ditulis sebagai flat list JSON (tanpa pengelompokan).
+
+---
+
+#### `raw_json` — JSON flat tanpa pengelompokan
+
+Sama dengan `json_labelling` dari sisi field record (`url`, `expected`, `category`, `description`), tapi ditulis sebagai **array datar** tanpa struktur group/agent.
+
+Cocok untuk inspeksi cepat atau pipeline yang tidak membutuhkan pembagian per agent.
+
+```json
+[
+  {
+    "url": "https://...",
+    "expected": "REJECTED",
+    "category": "STNK buram",
+    "description": "Foto STNK tidak terbaca"
+  }
+]
+```
+
+---
+
+#### `raw` — Data mentah asli
+
+Mengekspor baris dataset persis seperti aslinya, **tanpa transformasi**:
+
+- Mode CSV → file `.csv` dengan semua kolom original dataset.
+- Mode Finetune JSON → file `.json` berisi record original dari JSON sumber, dengan field anotasi (`expected`, `category`, `description`) yang sudah di-overlay dengan hasil review.
+
+Gunakan format ini jika perlu memeriksa seluruh kolom asli atau untuk keperluan audit.
+
+---
+
+#### `test_reason_json` — JSON evaluasi model lengkap
+
+Format untuk **evaluasi dan testing model verifikasi**. Setiap record mengandung field lengkap yang dibutuhkan untuk membandingkan prediksi model dengan hasil review manusia, termasuk kode penolakan terstandar.
+
+```json
+[
+  {
+    "web_registerasi_detail_id": "12345",
+    "web_register_id": "6789",
+    "police_number": "B1234XYZ",
+    "nomor_rangka": "MHFXX...",
+    "stnk_photo": "",
+    "vehicle_photo": "https://...",
+    "fuel_oil_type": "Bensin",
+    "wheel_count": "4",
+    "cubicle_centimeter": "1500",
+    "plate_color": "Hitam",
+    "mapped_rejection_code": "C-01",
+    "mapped_rejection_category": "Nopol tidak cocok",
+    "mapped_rejection_message": "",
+    "expected": "REJECTED",
+    "description": "Nomor polisi pada foto tidak cocok",
+    "is_valid_verifikasi_ulang": null,
+    "status": "REJECTED"
+  }
+]
+```
+
+Kode penolakan (`mapped_rejection_code`) dipetakan otomatis dari kategori yang dipilih reviewer, misalnya `Nopol tidak cocok` → `C-01`, `STNK buram` → `K-03`.
+
+---
+
+#### `data_train_reviewed` — CSV dengan label diperbarui
+
+Mengekspor dataset dalam format **CSV** dengan semua kolom asli dipertahankan, namun dua kolom diperbarui berdasarkan hasil review:
+
+- Kolom label (`Status` / `reviewer_label`) → diisi nilai `APPROVED`, `REJECTED`, atau `SKIP` dari hasil review.
+- Kolom `reviewer_notes` → diisi catatan tambahan reviewer (jika ada).
+
+Cocok sebagai dataset training baru yang siap digabung dengan dataset sebelumnya tanpa perlu transformasi tambahan.
+
+---
 
 Hasil export disimpan di `data/kurasi_outputs/<dataset>/<run_id>/`.
 
