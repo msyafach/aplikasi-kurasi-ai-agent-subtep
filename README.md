@@ -61,11 +61,22 @@ Buka browser ke `http://127.0.0.1:5000`.
 
 Langkah ini **hanya diperlukan** jika dataset tidak memiliki kolom `agent_key` (misalnya format *Data Dashboard*).
 
-- Pilih agent key yang sesuai via UI sebelum mulai anotasi:
+- Di bagian **Agent key** pada toolbar, pilih agent key yang sesuai:
   - `carphoto.*` — untuk data foto kendaraan
   - `ocr_stnk.*` — untuk data foto STNK
+- Klik tombol **Tandai Agent** untuk menerapkannya.
 
 Agent key menentukan kelompok kategori penolakan yang ditampilkan dan digunakan saat export `json_labelling`.
+
+**Mengganti agent key di tengah anotasi:**
+
+Jika dataset berisi campuran tipe data (misalnya sebagian foto kendaraan, sebagian STNK), agent key bisa diganti kapan saja tanpa harus reset sesi:
+
+1. Pilih agent key baru dari dropdown **Agent key** di toolbar.
+2. Klik **Tandai Agent**.
+3. Anotasi selanjutnya akan menggunakan agent key yang baru.
+
+> Baris yang sudah di-approve/reject sebelumnya tidak terpengaruh — agent key mereka sudah tersimpan di anotasi masing-masing.
 
 ### 3. Tinjau Setiap Gambar
 
@@ -208,6 +219,8 @@ Kode penolakan (`mapped_rejection_code`) dipetakan otomatis dari kategori yang d
 ---
 
 #### `data_train_reviewed` — CSV dengan label diperbarui
+
+> **Catatan:** Format ini hanya digunakan untuk dataset dengan preset **Data Train** (`url` + `reviewer_label` + `agent_key`). Tidak relevan untuk format Data Dashboard atau Custom.
 
 Mengekspor dataset dalam format **CSV** dengan semua kolom asli dipertahankan, namun dua kolom diperbarui berdasarkan hasil review:
 
