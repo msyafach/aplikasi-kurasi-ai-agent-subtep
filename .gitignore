@@ -1,6 +1,8 @@
 __pycache__
 .progress
 .verifikasi_progress.txt
+.python-version
 data
-
+.venv
+uploads
 .verifikasi_progress.json
