@@ -1041,6 +1041,7 @@ def get_row_payload(idx: int) -> dict[str, object]:
             "category": annotation["category"],
             "description": annotation["description"],
             "agent_key": annotation.get("agent_key", ""),
+            "reviewer_notes": annotation.get("reviewer_notes", ""),
         },
         "readings": {
             "stnk": parse_reading(row.get("STNK Reading")),
