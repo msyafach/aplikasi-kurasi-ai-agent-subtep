@@ -684,20 +684,21 @@ def export_records(scope: str, export_format: str) -> dict[str, object]:
         else:
             output = full_labelling_skeleton()
             flat_records = []
-            
+
             for idx in sorted(indices):
                 record = row_to_labelling_record(idx)
-                
-                # Determine agent key for this specific row
+
+                # Determine agent key: prefer per-row annotation, then CSV column, then session tag
                 row_agent = ""
                 annotation = ROW_ANNOTATIONS.get(idx, {})
                 if annotation.get("agent_key"):
                     row_agent = str(annotation["agent_key"]).strip()
                 elif "agent_key" in df.columns:
                     row_agent = str(df.iloc[idx].get("agent_key", "")).strip()
-                
                 if row_agent and (pd.isna(row_agent) or row_agent == "nan"):
                     row_agent = ""
+                if not row_agent:
+                    row_agent = CSV_TAG_AGENT_KEY  # fall back to session-level tag
 
                 if row_agent:
                     row_group = infer_group_key(row_agent)
@@ -756,7 +757,7 @@ def preview_records(scope: str, export_format: str, limit: int = 3) -> dict[str,
         if export_format == "json_labelling" and DATASET_MODE == "csv":
             output = full_labelling_skeleton()
             flat_records = []
-            
+
             for idx in sorted(preview_indices):
                 record = row_to_labelling_record(idx)
                 row_agent = ""
@@ -765,9 +766,10 @@ def preview_records(scope: str, export_format: str, limit: int = 3) -> dict[str,
                     row_agent = str(annotation["agent_key"]).strip()
                 elif "agent_key" in df.columns:
                     row_agent = str(df.iloc[idx].get("agent_key", "")).strip()
-                
                 if row_agent and (pd.isna(row_agent) or row_agent == "nan"):
                     row_agent = ""
+                if not row_agent:
+                    row_agent = CSV_TAG_AGENT_KEY
 
                 if row_agent:
                     row_group = infer_group_key(row_agent)
