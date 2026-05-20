@@ -216,6 +216,44 @@ dd {
   height: 36px;
 }
 
+.category-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.category-chips:empty {
+  display: none;
+}
+
+.category-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.category-chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 50%;
+}
+
+.category-chip-remove:hover {
+  color: var(--danger);
+}
+
 .required-star {
   color: var(--danger);
 }

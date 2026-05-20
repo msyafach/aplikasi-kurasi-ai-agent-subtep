@@ -36,6 +36,9 @@ DEFAULT_LABEL_COL = os.getenv("LABEL_COL", "Status")
 DEFAULT_FINETUNE_JSON_PATH = resolve_path(
     os.getenv("FINETUNE_JSON_PATH", "../finetuning/data_train_finetune_all_by_agent.json")
 )
+CURATION_TAXONOMY_PATH = resolve_path(
+    os.getenv("CURATION_TAXONOMY_PATH", "curation_taxonomy.json")
+)
 
 CATEGORY_TO_REJECTION_CODE: dict[str, str] = {
     # CarPhoto
@@ -65,26 +68,7 @@ CATEGORY_TO_REJECTION_CODE: dict[str, str] = {
     "Alasan penolakan foto stnk lainnya": "K-12",
 }
 
-CURATED_CATEGORIES: list[str] = [
-    "Nopol tidak cocok",
-    "Nopol editan",
-    "Foto kendaraan dari layar/cetakan",
-    "Foto kendaraan terindikasi edit",
-    "Foto kendaraan terindikasi buatan AI",
-    "Foto nopol salah sudut",
-    "Jumlah roda tidak sesuai",
-    "Jumlah roda tidak terlihat atau tidak bisa dikalkulasi",
-    "STNK editan",
-    "STNK non-asli (scan atau screenshot atau tidak berwarna)",
-    "STNK terpotong",
-    "STNK buram",
-    "Dokumen STNK tidak lengkap",
-    "Warna plat tidak sesuai dengan dokumen",
-    "No rangka tidak sesuai dengan dokumen",
-    "Nopol tidak sesuai dengan dokumen",
-    "Jenis BBM tidak sesuai dengan dokumen",
-    "Alasan penolakan foto stnk lainnya",
-]
+CURATED_CATEGORIES: list[str] = list(CATEGORY_TO_REJECTION_CODE.keys())
 
 IMAGE_TIMEOUT_SECONDS = float(os.getenv("IMAGE_TIMEOUT_SECONDS", "8"))
 MAX_IMAGE_SIZE = tuple(int(x) for x in os.getenv("MAX_IMAGE_SIZE", "900,700").split(",", 1))
@@ -241,42 +225,74 @@ def load_finetune_source(path_value: str | Path = DEFAULT_FINETUNE_JSON_PATH) ->
     return normalized
 
 
+_TAXONOMY_CACHE: dict[str, dict[str, dict[str, list[str]]]] | None = None
+
+
+def load_taxonomy() -> dict[str, dict[str, dict[str, list[str]]]]:
+    """Lightweight agent/category/description config used for the curation dropdowns,
+    so CSV modes don't depend on the large finetune JSON dataset."""
+    global _TAXONOMY_CACHE
+    if _TAXONOMY_CACHE is None:
+        try:
+            _TAXONOMY_CACHE = json.loads(CURATION_TAXONOMY_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            _TAXONOMY_CACHE = {}
+    return _TAXONOMY_CACHE
+
+
 def finetune_agent_options() -> list[dict[str, object]]:
-    source = FINETUNE_DATA or load_finetune_source(FINETUNE_JSON_PATH)
-    options = []
-    for group_key, agents in source.items():
-        for agent_key, records in agents.items():
-            options.append({"group": group_key, "agent_key": agent_key, "count": len(records)})
-    return options
+    if FINETUNE_DATA:
+        return [
+            {"group": group_key, "agent_key": agent_key, "count": len(records)}
+            for group_key, agents in FINETUNE_DATA.items()
+            for agent_key, records in agents.items()
+        ]
+    return [
+        {"group": group_key, "agent_key": agent_key, "count": 0}
+        for group_key, agents in load_taxonomy().items()
+        for agent_key in agents
+    ]
 
 
 def finetune_categories(agent_key: str | None = None) -> list[str]:
-    source = FINETUNE_DATA or load_finetune_source(FINETUNE_JSON_PATH)
-    categories = set()
-    for agents in source.values():
-        for current_agent_key, records in agents.items():
-            if agent_key and current_agent_key != agent_key:
-                continue
-            for record in records:
-                value = str(record.get("category") or "").strip()
-                if value:
-                    categories.add(value)
+    categories: set[str] = set()
+    if FINETUNE_DATA:
+        for agents in FINETUNE_DATA.values():
+            for current_agent_key, records in agents.items():
+                if agent_key and current_agent_key != agent_key:
+                    continue
+                for record in records:
+                    value = str(record.get("category") or "").strip()
+                    if value:
+                        categories.add(value)
+    else:
+        for agents in load_taxonomy().values():
+            for current_agent_key, meta in agents.items():
+                if agent_key and current_agent_key != agent_key:
+                    continue
+                categories.update(c for c in meta.get("categories", []) if c)
     return sorted(categories)
 
 
 def finetune_descriptions(agent_key: str | None = None, category: str | None = None) -> list[str]:
-    source = FINETUNE_DATA or load_finetune_source(FINETUNE_JSON_PATH)
-    descriptions = set()
-    for agents in source.values():
-        for current_agent_key, records in agents.items():
-            if agent_key and current_agent_key != agent_key:
-                continue
-            for record in records:
-                if category is not None and str(record.get("category") or "").strip() != category:
+    descriptions: set[str] = set()
+    if FINETUNE_DATA:
+        for agents in FINETUNE_DATA.values():
+            for current_agent_key, records in agents.items():
+                if agent_key and current_agent_key != agent_key:
                     continue
-                value = str(record.get("description") or "").strip()
-                if value:
-                    descriptions.add(value)
+                for record in records:
+                    if category is not None and str(record.get("category") or "").strip() != category:
+                        continue
+                    value = str(record.get("description") or "").strip()
+                    if value:
+                        descriptions.add(value)
+    else:
+        for agents in load_taxonomy().values():
+            for current_agent_key, meta in agents.items():
+                if agent_key and current_agent_key != agent_key:
+                    continue
+                descriptions.update(d for d in meta.get("descriptions", []) if d)
     return sorted(descriptions)
 
 
@@ -816,7 +832,7 @@ def row_to_labelling_record(idx: int) -> dict[str, object]:
     record = {
         "url": safe_value(row.get(URL_COL, "")),
         "expected": annotation["expected"],
-        "category": annotation["category"],
+        "category": split_categories(annotation["category"]),
         "description": annotation["description"],
     }
     if annotation.get("reviewer_notes"):
@@ -889,8 +905,20 @@ def annotation_for_idx(idx: int) -> dict[str, str]:
     }
 
 
-def category_to_code(category: str) -> str:
-    return CATEGORY_TO_REJECTION_CODE.get(category.strip(), "")
+CATEGORY_SEPARATOR = "; "
+
+
+def split_categories(category: object) -> list[str]:
+    return [part.strip() for part in str(category or "").split(";") if part.strip()]
+
+
+def category_to_codes(category: object) -> list[str]:
+    codes = []
+    for name in split_categories(category):
+        code = CATEGORY_TO_REJECTION_CODE.get(name, "")
+        if code:
+            codes.append(code)
+    return codes
 
 
 def row_to_test_reason_record(idx: int) -> dict[str, object]:
@@ -908,8 +936,8 @@ def row_to_test_reason_record(idx: int) -> dict[str, object]:
             "wheel_count": "",
             "cubicle_centimeter": "",
             "plate_color": "",
-            "mapped_rejection_code": category_to_code(category),
-            "mapped_rejection_category": category,
+            "mapped_rejection_code": category_to_codes(category),
+            "mapped_rejection_category": split_categories(category),
             "mapped_rejection_message": "",
             "expected": record.get("expected", ""),
             "description": record.get("description", ""),
@@ -921,8 +949,11 @@ def row_to_test_reason_record(idx: int) -> dict[str, object]:
     stnk_reading = parse_reading(row.get("STNK Reading"))
     vehicle_reading = parse_reading(row.get("Vehicle Reading"))
     annotation = annotation_for_idx(idx)
-    category = annotation["category"]
-    derived_code = category_to_code(category)
+    categories = split_categories(annotation["category"])
+    derived_codes = category_to_codes(annotation["category"])
+    if not categories:
+        categories = split_categories(row.get("mapped_rejection_category", ""))
+        derived_codes = split_categories(row.get("mapped_rejection_code", ""))
 
     return {
         "web_registerasi_detail_id": safe_value(
@@ -945,8 +976,8 @@ def row_to_test_reason_record(idx: int) -> dict[str, object]:
         "wheel_count": safe_value(first_value(row.get("wheel_count"), vehicle_reading.get("wheel_count"))),
         "cubicle_centimeter": safe_value(first_value(row.get("cubicle_centimeter"), stnk_reading.get("cubicle_centimeter"))),
         "plate_color": safe_value(first_value(row.get("plate_color"), stnk_reading.get("plat_color"), vehicle_reading.get("plat_color"))),
-        "mapped_rejection_code": derived_code or safe_value(row.get("mapped_rejection_code", "")),
-        "mapped_rejection_category": category or safe_value(row.get("mapped_rejection_category", "")),
+        "mapped_rejection_code": derived_codes,
+        "mapped_rejection_category": categories,
         "mapped_rejection_message": safe_value(row.get("mapped_rejection_message", "")),
         "expected": annotation["expected"],
         "description": annotation["description"],
@@ -1107,9 +1138,9 @@ def dataset_payload() -> dict[str, object]:
             "agent_key": FINETUNE_AGENT_KEY,
             "csv_tag_agent_key": CSV_TAG_AGENT_KEY,
             "csv_tag_group_key": CSV_TAG_GROUP_KEY,
-            "agents": finetune_agent_options() if DEFAULT_FINETUNE_JSON_PATH.exists() else [],
+            "agents": finetune_agent_options(),
             "categories": finetune_categories(FINETUNE_AGENT_KEY) if DATASET_MODE == "finetune_json" else [],
-            "all_categories": finetune_categories() if DEFAULT_FINETUNE_JSON_PATH.exists() else [],
+            "all_categories": finetune_categories(),
             "descriptions": finetune_descriptions(FINETUNE_AGENT_KEY) if DATASET_MODE == "finetune_json" else [],
         },
         "progress_file": path_label(PROGRESS_FILE),
@@ -1162,20 +1193,14 @@ def api_dataset() -> Response:
 
 @app.get("/api/finetune/meta")
 def api_finetune_meta() -> Response:
-    try:
-        global FINETUNE_DATA
-        if not FINETUNE_DATA:
-            FINETUNE_DATA = load_finetune_source(FINETUNE_JSON_PATH)
-        return jsonify(
-            {
-                "json_path": path_label(FINETUNE_JSON_PATH),
-                "agents": finetune_agent_options(),
-                "categories": finetune_categories(),
-                "descriptions": finetune_descriptions(),
-            }
-        )
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
+    return jsonify(
+        {
+            "json_path": path_label(FINETUNE_JSON_PATH),
+            "agents": finetune_agent_options(),
+            "categories": finetune_categories(),
+            "descriptions": finetune_descriptions(),
+        }
+    )
 
 
 @app.post("/api/finetune/agent")

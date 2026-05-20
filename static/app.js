@@ -12,6 +12,7 @@ let filterIndices = null;
 let filterPos = 0;
 let resumeIndex = window.APP_CONFIG.startIndex || 0;
 let suppressNextImageError = false;
+let selectedCategories = [];
 
 console.log(`[INIT] currentIndex=${currentIndex}, resumeIndex=${resumeIndex}`);
 
@@ -41,6 +42,7 @@ const elements = {
   categoryEditor: document.getElementById("categoryEditor"),
   categoryInput: document.getElementById("categoryInput"),
   categoryList: document.getElementById("categoryList"),
+  categoryChips: document.getElementById("categoryChips"),
   descriptionTitle: document.getElementById("descriptionTitle"),
   descriptionEditor: document.getElementById("descriptionEditor"),
   descriptionSelect: document.getElementById("descriptionSelect"),
@@ -217,6 +219,45 @@ function setFinetuneEditorsVisible(isVisible, showCatDesc = true) {
   });
 }
 
+function splitCategories(value) {
+  return String(value || "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function renderCategoryChips() {
+  if (!elements.categoryChips) return;
+  elements.categoryChips.replaceChildren();
+  selectedCategories.forEach((cat, index) => {
+    const chip = document.createElement("span");
+    chip.className = "category-chip";
+    const label = document.createElement("span");
+    label.textContent = cat;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "category-chip-remove";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Hapus ${cat}`);
+    remove.addEventListener("click", () => {
+      selectedCategories.splice(index, 1);
+      renderCategoryChips();
+    });
+    chip.appendChild(label);
+    chip.appendChild(remove);
+    elements.categoryChips.appendChild(chip);
+  });
+}
+
+function addCategory(value) {
+  const name = String(value || "").trim();
+  if (!name) return;
+  if (!selectedCategories.includes(name)) {
+    selectedCategories.push(name);
+    renderCategoryChips();
+  }
+}
+
 function renderAnnotation(row) {
   const isFinetune = row.dataset && row.dataset.mode === "finetune_json";
   const isCsv = row.dataset && row.dataset.mode === "csv";
@@ -234,7 +275,9 @@ function renderAnnotation(row) {
     opt.value = cat;
     elements.categoryList.appendChild(opt);
   });
-  elements.categoryInput.value = annotation.category || "";
+  selectedCategories = splitCategories(annotation.category);
+  renderCategoryChips();
+  elements.categoryInput.value = "";
 
   fillSelect(elements.descriptionSelect, row.description_options || (row.dataset.finetune && row.dataset.finetune.descriptions) || [], annotation.description || "", true);
   elements.descriptionText.value = annotation.description || "";
@@ -250,7 +293,7 @@ function currentAnnotation() {
     : (elements.agentKeySelect ? elements.agentKeySelect.value : "");
   return {
     expected: elements.expectedSelect.value,
-    category: elements.categoryInput ? elements.categoryInput.value : "",
+    category: selectedCategories.join("; "),
     description: elements.descriptionText.value,
     agent_key: agentKey,
     reviewer_notes: elements.reviewerNotesText ? elements.reviewerNotesText.value : "",
@@ -799,6 +842,21 @@ elements.buttons.forEach((button) => {
 elements.datasetSelect.addEventListener("change", () => {
   elements.datasetPath.value = elements.datasetSelect.value;
   switchDataset();
+});
+
+elements.categoryInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    addCategory(elements.categoryInput.value);
+    elements.categoryInput.value = "";
+  }
+});
+elements.categoryInput.addEventListener("input", () => {
+  const options = Array.from(elements.categoryList.options).map((opt) => opt.value);
+  if (options.includes(elements.categoryInput.value)) {
+    addCategory(elements.categoryInput.value);
+    elements.categoryInput.value = "";
+  }
 });
 
 elements.loadDataset.addEventListener("click", switchDataset);
