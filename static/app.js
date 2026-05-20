@@ -206,7 +206,7 @@ function renderDataset(dataset) {
   updateButtonStates();
 }
 
-function setFinetuneEditorsVisible(isVisible, showCatDesc = true) {
+function setFinetuneEditorsVisible(isVisible, showCatDesc = true, showReviewerNotes = false) {
   const showCategoryDescription = isVisible && showCatDesc;
   [elements.categoryTitle, elements.categoryEditor, elements.descriptionTitle, elements.descriptionEditor].forEach((el) => {
     el.hidden = !showCategoryDescription;
@@ -214,8 +214,9 @@ function setFinetuneEditorsVisible(isVisible, showCatDesc = true) {
   [elements.expectedTitle, elements.expectedEditor].forEach((el) => {
     el.hidden = !isVisible;
   });
+  const showNotes = isVisible && showReviewerNotes;
   [elements.reviewerNotesTitle, elements.reviewerNotesEditor].forEach((el) => {
-    el.hidden = !isVisible;
+    el.hidden = !showNotes;
   });
 }
 
@@ -263,7 +264,8 @@ function renderAnnotation(row) {
   const isCsv = row.dataset && row.dataset.mode === "csv";
   const showEditors = isFinetune || isCsv;
   const showCatDesc = isFinetune || (isCsv && currentFormatPreset !== "data_train");
-  setFinetuneEditorsVisible(showEditors, showCatDesc);
+  const showReviewerNotes = isCsv && currentFormatPreset === "data_train";
+  setFinetuneEditorsVisible(showEditors, showCatDesc, showReviewerNotes);
   if (!showEditors) return;
 
   const annotation = row.annotation || {};
@@ -541,10 +543,11 @@ async function loadFinetuneMeta() {
   const response = await fetch("/api/finetune/meta");
   if (!response.ok) return;
   const payload = await response.json();
+  const currentSelected = elements.agentKeySelect.value;
   fillSelect(
     elements.agentKeySelect,
     (payload.agents || []).map((agent) => agent.agent_key),
-    "",
+    currentSelected,
     false,
   );
 }
