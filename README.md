@@ -33,16 +33,6 @@ python app.py
 
 Buka browser ke `http://127.0.0.1:5000`.
 
-**Variabel environment (opsional)**
-
-| Variabel | Default | Keterangan |
-|---|---|---|
-| `CSV_PATH` | `data/kendaraan.screen_document_180526.csv` | Path dataset default |
-| `PORT` | `5000` | Port server |
-| `URL_COL` | `Foto Kendaraan` | Nama kolom URL gambar |
-| `LABEL_COL` | `Status` | Nama kolom label |
-| `IMAGE_TIMEOUT_SECONDS` | `8` | Timeout fetch gambar |
-
 ---
 
 ## Langkah-Langkah Anotasi
@@ -219,8 +209,6 @@ Kode penolakan (`mapped_rejection_code`) dipetakan otomatis dari kategori yang d
 ---
 
 #### `data_train_reviewed` — CSV dengan label diperbarui
-
-> **Catatan:** Format ini hanya digunakan untuk dataset dengan preset **Data Train** (`url` + `reviewer_label` + `agent_key`). Tidak relevan untuk format Data Dashboard atau Custom.
 
 Mengekspor dataset dalam format **CSV** dengan semua kolom asli dipertahankan, namun dua kolom diperbarui berdasarkan hasil review:
 
