@@ -1052,6 +1052,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "2") sendAction("reject");
   if (event.key === "3") sendAction("skip");
   if (event.key === "n" && !elements.reviewerNotesText.disabled) {
+    event.preventDefault();
     elements.reviewerNotesText.focus();
     elements.reviewerNotesText.select();
   }
