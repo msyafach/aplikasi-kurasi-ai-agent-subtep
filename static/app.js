@@ -51,6 +51,7 @@ const elements = {
   expectedEditor: document.getElementById("expectedEditor"),
   expectedSelect: document.getElementById("expectedSelect"),
   image: document.getElementById("vehicleImage"),
+  imageSpinner: document.getElementById("imageSpinner"),
   imageError: document.getElementById("imageError"),
   reviewStatus: document.getElementById("reviewStatus"),
   nopol: document.getElementById("nopol"),
@@ -97,6 +98,14 @@ function updateButtonStates() {
   elements.buttons.forEach((button) => {
     button.disabled = actionsDisabled;
   });
+  elements.imageSpinner.hidden = !imageLoading;
+  // Info panel fields must also be locked while image is loading or busy
+  const fieldsDisabled = apiBusy || imageLoading;
+  elements.expectedSelect.disabled = fieldsDisabled;
+  elements.reviewerNotesText.disabled = fieldsDisabled;
+  elements.categoryInput.disabled = fieldsDisabled;
+  elements.descriptionSelect.disabled = fieldsDisabled;
+  elements.descriptionText.disabled = fieldsDisabled;
   elements.loadDataset.disabled = apiBusy;
   elements.resetReview.disabled = apiBusy;
   elements.resetAndDeleteOutputs.disabled = apiBusy;
@@ -109,7 +118,9 @@ function updateButtonStates() {
   elements.clearFilter.disabled = apiBusy;
   elements.continueBtn.hidden = !stopped;
   elements.continueBtn.disabled = apiBusy || !agentTagged;
-  elements.loadAgent.classList.toggle("agent-required-pulse", !agentTagged && !apiBusy && datasetLoaded);
+  const needsAgentPick = !agentTagged && !apiBusy && datasetLoaded;
+  elements.loadAgent.classList.toggle("agent-required-pulse", needsAgentPick && currentDatasetMode === "finetune_json");
+  elements.agentKeySelect.classList.toggle("agent-required-pulse", needsAgentPick && currentDatasetMode !== "finetune_json");
   elements.agentRequiredHint.hidden = agentTagged || !datasetLoaded;
 }
 
@@ -165,12 +176,9 @@ function renderDataset(dataset) {
     const selectedAgentKey = dataset.mode === "finetune_json"
       ? dataset.finetune.agent_key
       : (dataset.finetune.csv_tag_agent_key || dataset.finetune.agent_key);
-    fillSelect(
-      elements.agentKeySelect,
-      (dataset.finetune.agents || []).map((agent) => agent.agent_key),
-      selectedAgentKey,
-      false,
-    );
+    const agents = (dataset.finetune.agents || []).map((agent) => agent.agent_key);
+    // CSV mode: include empty first option so user must actively pick an agent
+    fillSelect(elements.agentKeySelect, agents, selectedAgentKey, dataset.mode !== "finetune_json");
     if (dataset.mode === "finetune_json") {
       elements.currentCsv.textContent = `JSON: ${dataset.finetune.json_path} | Agent: ${dataset.finetune.agent_key}`;
     } else if (dataset.finetune.csv_tag_agent_key) {
@@ -178,24 +186,31 @@ function renderDataset(dataset) {
     }
   }
   currentDatasetMode = dataset.mode || "csv";
-  if (dataset.format_preset) currentFormatPreset = dataset.format_preset;
+  if (dataset.format_preset) {
+    currentFormatPreset = dataset.format_preset;
+    elements.formatPreset.value = dataset.format_preset;
+  }
 
   const isDataTrainDataset = currentFormatPreset === "data_train";
   document.querySelector(".finetune-bar").hidden = isDataTrainDataset;
   const exportOptDataTrain = document.getElementById("exportOptDataTrain");
   if (exportOptDataTrain) exportOptDataTrain.hidden = !isDataTrainDataset;
 
+  // "Tandai Agent" button loads records in finetune_json; csv uses dropdown change handler
+  elements.loadAgent.hidden = currentDatasetMode !== "finetune_json";
+
+  // Restore agent key column selector for data_train format
+  elements.agentKeyColLabel.hidden = !isDataTrainDataset;
+  if (isDataTrainDataset && dataset.columns && dataset.columns.length > 0) {
+    const agentKeyCol = dataset.agent_key_col || "agent_key";
+    fillColumnSelect(elements.agentKeyColSelect, dataset.columns, agentKeyCol);
+  }
+
   agentTagged = isDataTrainDataset
     ? true
     : currentDatasetMode === "finetune_json"
       ? !!(dataset.finetune && dataset.finetune.agent_key)
       : !!(dataset.finetune && dataset.finetune.csv_tag_agent_key);
-
-  // Repopulate agent key column selector if it's currently visible (data_train mode)
-  if (!elements.agentKeyColLabel.hidden && dataset.columns && dataset.columns.length > 0) {
-    const currentAgentKeyCol = elements.agentKeyColSelect.value || "agent_key";
-    fillColumnSelect(elements.agentKeyColSelect, dataset.columns, currentAgentKeyCol);
-  }
 
   // Toggle dashboard fields based on loaded dataset's label column
   const isDashboard = dataset.label_col === "Status";
@@ -864,6 +879,33 @@ elements.categoryInput.addEventListener("input", () => {
 
 elements.loadDataset.addEventListener("click", switchDataset);
 elements.loadAgent.addEventListener("click", switchAgent);
+
+// CSV mode: auto-tag agent on dropdown change (no button click needed)
+elements.agentKeySelect.addEventListener("change", async () => {
+  if (currentDatasetMode === "finetune_json") return;
+  const agentKey = elements.agentKeySelect.value;
+  agentTagged = !!agentKey;
+  updateButtonStates();
+  if (!agentKey || !datasetLoaded) return;
+  try {
+    const res = await fetch("/api/tag/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_key: agentKey }),
+    });
+    const payload = await res.json();
+    if (res.ok) {
+      renderDataset(payload.dataset);
+      elements.message.textContent = `Agent key: ${agentKey}`;
+    } else {
+      elements.message.textContent = `Gagal set agent: ${payload.error}`;
+      agentTagged = false;
+      updateButtonStates();
+    }
+  } catch (err) {
+    elements.message.textContent = `Gagal set agent: ${err.message}`;
+  }
+});
 elements.exportData.addEventListener("click", exportData);
 elements.previewExport.addEventListener("click", previewExport);
 elements.closePreview.addEventListener("click", () => {
@@ -894,9 +936,10 @@ elements.formatPreset.addEventListener("change", () => {
     el.hidden = !isDashboard;
   });
 
-  // Show agent key column selector only for data_train format
+  // Show agent key column selector only for data_train format; hide agent key picker
   const isDataTrain = !!(preset && preset.id === "data_train");
   elements.agentKeyColLabel.hidden = !isDataTrain;
+  document.querySelector(".finetune-bar").hidden = isDataTrain;
   if (isDataTrain) {
     const cols = Array.from(elements.urlColumnSelect.options).map((o) => o.value);
     if (cols.length > 0) fillColumnSelect(elements.agentKeyColSelect, cols, "agent_key");
@@ -1027,6 +1070,7 @@ async function doResumeSession(session) {
         url_col: session.url_col,
         label_col: session.label_col,
         format_preset: session.format_preset,
+        agent_key_col: session.agent_key_col || undefined,
       }),
     });
     const payload = await response.json();

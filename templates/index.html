@@ -70,7 +70,7 @@
           <select id="agentKeySelect"></select>
         </label>
         <button type="button" id="loadAgent" class="secondary">Tandai Agent</button>
-        <span id="agentRequiredHint" class="agent-required-hint" hidden>Pilih dan tandai agent key terlebih dahulu sebelum melanjutkan.</span>
+        <span id="agentRequiredHint" class="agent-required-hint" hidden>Pilih agent key dari dropdown sebelum melanjutkan.</span>
       </section>
 
       <section class="export-bar">
@@ -156,6 +156,7 @@
 
       <section class="content">
         <div class="image-panel">
+          <div id="imageSpinner" class="image-spinner" hidden></div>
           <img id="vehicleImage" alt="Foto kendaraan">
           <div id="imageError" class="image-error" hidden>
             Gagal memuat gambar.

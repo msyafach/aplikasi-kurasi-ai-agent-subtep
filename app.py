@@ -96,6 +96,7 @@ FINETUNE_AGENT_KEY = ""
 ROW_ANNOTATIONS: dict[int, dict[str, str]] = {}
 CSV_TAG_AGENT_KEY = ""
 CSV_TAG_GROUP_KEY = ""
+AGENT_KEY_COL = ""  # Original column name passed to load_dataset (may differ from "agent_key" after rename)
 
 df = pd.DataFrame()
 kept_indices: set[int] = set()
@@ -142,6 +143,7 @@ def init_db() -> None:
                 format_preset TEXT NOT NULL DEFAULT '',
                 url_col TEXT NOT NULL DEFAULT '',
                 label_col TEXT NOT NULL DEFAULT '',
+                agent_key_col TEXT NOT NULL DEFAULT '',
                 run_id TEXT NOT NULL DEFAULT '',
                 current_index INTEGER NOT NULL DEFAULT 0,
                 last_accessed TEXT NOT NULL DEFAULT (datetime('now')),
@@ -160,6 +162,11 @@ def init_db() -> None:
                 UNIQUE(session_id, row_index)
             );
         """)
+        # Migrate existing DB: add agent_key_col if not present
+        try:
+            conn.execute("ALTER TABLE sessions ADD COLUMN agent_key_col TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
 
 def _current_dataset_path_label() -> str:
@@ -188,12 +195,12 @@ def _ensure_session() -> int:
         conn.execute("""
             INSERT OR IGNORE INTO sessions
             (dataset_path, dataset_hash, dataset_mode, finetune_agent_key,
-             tagged_agent_key, tagged_group_key, format_preset, url_col, label_col, run_id, current_index)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             tagged_agent_key, tagged_group_key, format_preset, url_col, label_col, agent_key_col, run_id, current_index)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             ds_path, ds_hash, DATASET_MODE, ft_agent,
             CSV_TAG_AGENT_KEY, CSV_TAG_GROUP_KEY,
-            DATASET_FORMAT_PRESET, URL_COL, LABEL_COL, RUN_ID, start_index,
+            DATASET_FORMAT_PRESET, URL_COL, LABEL_COL, AGENT_KEY_COL, RUN_ID, start_index,
         ))
         row = conn.execute(
             "SELECT id FROM sessions WHERE dataset_path=? AND dataset_hash=? AND finetune_agent_key=?",
@@ -471,7 +478,7 @@ def finetune_progress_path_for(json_path: Path, agent_key: str) -> Path:
 def load_dataset(path_value: str | Path, url_col: str | None = None, label_col: str | None = None, agent_key_col: str | None = None, format_preset: str = "") -> None:
     global CSV_PATH, OUTPUT_KEEP, OUTPUT_DELETED, OUTPUT_RAW, OUTPUT_SKIP, PROGRESS_FILE, URL_COL, LABEL_COL, RUN_ID, DATASET_MODE, DATASET_FORMAT_PRESET
     global df, kept_indices, deleted_indices, skipped_indices, start_index, ROW_ANNOTATIONS
-    global CSV_TAG_AGENT_KEY, CSV_TAG_GROUP_KEY, CSV_FILE_HASH, SESSION_DB_ID
+    global CSV_TAG_AGENT_KEY, CSV_TAG_GROUP_KEY, CSV_FILE_HASH, SESSION_DB_ID, AGENT_KEY_COL
     DATASET_FORMAT_PRESET = format_preset
 
     CSV_TAG_AGENT_KEY = ""
@@ -487,6 +494,9 @@ def load_dataset(path_value: str | Path, url_col: str | None = None, label_col: 
     CSV_FILE_HASH = file_content_hash(csv_path)
     loaded_df = pd.read_csv(csv_path)
     columns = [str(column) for column in loaded_df.columns]
+
+    # Store original column name before any rename (needed to reproduce the mapping on session resume)
+    AGENT_KEY_COL = agent_key_col or ("agent_key" if "agent_key" in columns else "")
 
     if agent_key_col and agent_key_col != "agent_key" and agent_key_col in columns:
         loaded_df = loaded_df.rename(columns={agent_key_col: "agent_key"})
@@ -1434,6 +1444,7 @@ def dataset_payload() -> dict[str, object]:
         "columns": list(df.columns),
         "url_col": URL_COL,
         "label_col": LABEL_COL,
+        "agent_key_col": AGENT_KEY_COL,
         "run_id": RUN_ID,
         "finetune": {
             "json_path": path_label(FINETUNE_JSON_PATH),
@@ -1763,6 +1774,7 @@ def api_sessions_last() -> Response:
             "format_preset": row["format_preset"],
             "url_col": row["url_col"],
             "label_col": row["label_col"],
+            "agent_key_col": row["agent_key_col"],
             "current_index": row["current_index"],
             "last_accessed": row["last_accessed"],
         }
