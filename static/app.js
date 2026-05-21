@@ -1051,6 +1051,10 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "1") sendAction("approve");
   if (event.key === "2") sendAction("reject");
   if (event.key === "3") sendAction("skip");
+  if (event.key === "n" && !elements.reviewerNotesText.disabled) {
+    elements.reviewerNotesText.focus();
+    elements.reviewerNotesText.select();
+  }
 });
 
 elements.retryImage.addEventListener("click", () => {
