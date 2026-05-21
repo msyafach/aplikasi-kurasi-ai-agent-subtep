@@ -6,3 +6,4 @@ data
 .venv
 uploads
 .verifikasi_progress.json
+*.db

@@ -21,6 +21,12 @@
         </div>
       </header>
 
+      <div id="resumeSessionBanner" class="resume-banner" hidden>
+        <span id="resumeSessionLabel" class="resume-banner-label"></span>
+        <button type="button" id="resumeSessionBtn" class="secondary">Lanjutkan Session</button>
+        <button type="button" id="dismissSessionBanner" class="secondary">Tutup</button>
+      </div>
+
       <section class="dataset-bar">
         <label>
           Dataset
@@ -108,6 +114,19 @@
           <button type="button" id="closePreview" class="secondary">Tutup</button>
         </div>
         <pre id="previewContent"></pre>
+      </section>
+
+      <section class="migrate-bar">
+        <button type="button" id="migrateBtn" class="secondary">Migrasi Data Lama (.progress → SQLite)</button>
+        <span id="migrateStatus" class="muted"></span>
+      </section>
+
+      <section id="migrateResultPanel" class="migrate-result-panel" hidden>
+        <div class="preview-header">
+          <strong id="migrateResultTitle">Hasil Migrasi</strong>
+          <button type="button" id="closeMigrateResult" class="secondary">Tutup</button>
+        </div>
+        <pre id="migrateResultContent"></pre>
       </section>
 
       <section class="filter-bar">

@@ -4,6 +4,8 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -76,7 +78,7 @@ MAX_IMAGE_SIZE = tuple(int(x) for x in os.getenv("MAX_IMAGE_SIZE", "900,700").sp
 
 app = Flask(__name__)
 
-CSV_PATH = DEFAULT_CSV_PATH
+CSV_PATH: Path = Path("")  # Set by load_dataset(); empty means no dataset loaded
 OUTPUT_KEEP = DEFAULT_OUTPUT_KEEP
 OUTPUT_DELETED = DEFAULT_OUTPUT_DELETED
 OUTPUT_RAW = DEFAULT_OUTPUT_RAW
@@ -101,9 +103,108 @@ deleted_indices: set[int] = set()
 skipped_indices: set[int] = set()
 start_index = 0
 
-
 CSV_FILE_HASH = ""
 FINETUNE_FILE_HASH = ""
+
+DB_PATH = APP_DIR / "kurasi.db"
+SESSION_DB_ID: int | None = None
+
+
+# ---------- SQLite helpers ----------
+
+@contextmanager
+def get_db():
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def init_db() -> None:
+    with get_db() as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dataset_path TEXT NOT NULL,
+                dataset_hash TEXT NOT NULL,
+                dataset_mode TEXT NOT NULL DEFAULT 'csv',
+                finetune_agent_key TEXT NOT NULL DEFAULT '',
+                tagged_agent_key TEXT NOT NULL DEFAULT '',
+                tagged_group_key TEXT NOT NULL DEFAULT '',
+                format_preset TEXT NOT NULL DEFAULT '',
+                url_col TEXT NOT NULL DEFAULT '',
+                label_col TEXT NOT NULL DEFAULT '',
+                run_id TEXT NOT NULL DEFAULT '',
+                current_index INTEGER NOT NULL DEFAULT 0,
+                last_accessed TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(dataset_path, dataset_hash, finetune_agent_key)
+            );
+            CREATE TABLE IF NOT EXISTS annotations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                row_index INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'raw',
+                expected TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                agent_key TEXT NOT NULL DEFAULT '',
+                reviewer_notes TEXT NOT NULL DEFAULT '',
+                UNIQUE(session_id, row_index)
+            );
+        """)
+
+
+def _current_dataset_path_label() -> str:
+    return path_label(CSV_PATH) if CSV_PATH.name else ""
+
+
+def _session_key() -> tuple[str, str, str]:
+    path = _current_dataset_path_label()
+    if not path:
+        return ("", "", "")
+    if DATASET_MODE == "finetune_json":
+        return (path, FINETUNE_FILE_HASH, FINETUNE_AGENT_KEY)
+    return (path, CSV_FILE_HASH, "")
+
+
+def _ensure_session() -> int:
+    global SESSION_DB_ID
+    if SESSION_DB_ID is not None:
+        return SESSION_DB_ID
+
+    ds_path, ds_hash, ft_agent = _session_key()
+    if not ds_path:
+        raise RuntimeError("No dataset loaded")
+
+    with get_db() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO sessions
+            (dataset_path, dataset_hash, dataset_mode, finetune_agent_key,
+             tagged_agent_key, tagged_group_key, format_preset, url_col, label_col, run_id, current_index)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            ds_path, ds_hash, DATASET_MODE, ft_agent,
+            CSV_TAG_AGENT_KEY, CSV_TAG_GROUP_KEY,
+            DATASET_FORMAT_PRESET, URL_COL, LABEL_COL, RUN_ID, start_index,
+        ))
+        row = conn.execute(
+            "SELECT id FROM sessions WHERE dataset_path=? AND dataset_hash=? AND finetune_agent_key=?",
+            (ds_path, ds_hash, ft_agent),
+        ).fetchone()
+        SESSION_DB_ID = row["id"]
+
+    return SESSION_DB_ID
+
+
+# ---------- end SQLite helpers ----------
 
 
 def file_content_hash(path: Path, length: int = 8) -> str:
@@ -180,7 +281,6 @@ def _scan_csv_dir(directory: Path, datasets: list) -> None:
 def dataset_candidates() -> list[dict[str, object]]:
     datasets: list[dict[str, object]] = []
     seen: set[str] = set()
-    # Scan DATA_DIR and APP_DIR (and its uploads subfolder)
     for directory in [DATA_DIR, APP_DIR, APP_DIR / "uploads"]:
         if not directory.exists():
             continue
@@ -229,8 +329,7 @@ _TAXONOMY_CACHE: dict[str, dict[str, dict[str, list[str]]]] | None = None
 
 
 def load_taxonomy() -> dict[str, dict[str, dict[str, list[str]]]]:
-    """Lightweight agent/category/description config used for the curation dropdowns,
-    so CSV modes don't depend on the large finetune JSON dataset."""
+    """Lightweight agent/category/description config used for the curation dropdowns."""
     global _TAXONOMY_CACHE
     if _TAXONOMY_CACHE is None:
         try:
@@ -360,7 +459,6 @@ def finetune_output_paths_for(json_path: Path, agent_key: str, run_id: str) -> t
 def progress_path_for(csv_path: Path) -> Path:
     if csv_path.resolve() == DEFAULT_CSV_PATH.resolve():
         return DEFAULT_PROGRESS_FILE
-
     progress_dir = APP_DIR / ".progress"
     return progress_dir / f"{_csv_dir_id(csv_path)}.json"
 
@@ -370,21 +468,15 @@ def finetune_progress_path_for(json_path: Path, agent_key: str) -> Path:
     return progress_dir / f"{_finetune_dir_id(json_path)}__{safe_filename(agent_key)}.json"
 
 
-def _migrate_progress(new_path: Path, old_path: Path) -> None:
-    """Copy old-style progress file to new hash-based path if new one doesn't exist yet."""
-    if not new_path.exists() and old_path.exists():
-        new_path.parent.mkdir(parents=True, exist_ok=True)
-        new_path.write_bytes(old_path.read_bytes())
-
-
 def load_dataset(path_value: str | Path, url_col: str | None = None, label_col: str | None = None, agent_key_col: str | None = None, format_preset: str = "") -> None:
     global CSV_PATH, OUTPUT_KEEP, OUTPUT_DELETED, OUTPUT_RAW, OUTPUT_SKIP, PROGRESS_FILE, URL_COL, LABEL_COL, RUN_ID, DATASET_MODE, DATASET_FORMAT_PRESET
     global df, kept_indices, deleted_indices, skipped_indices, start_index, ROW_ANNOTATIONS
-    global CSV_TAG_AGENT_KEY, CSV_TAG_GROUP_KEY, CSV_FILE_HASH
+    global CSV_TAG_AGENT_KEY, CSV_TAG_GROUP_KEY, CSV_FILE_HASH, SESSION_DB_ID
     DATASET_FORMAT_PRESET = format_preset
 
     CSV_TAG_AGENT_KEY = ""
     CSV_TAG_GROUP_KEY = ""
+    SESSION_DB_ID = None
 
     csv_path = resolve_path(str(path_value))
     if not csv_path.exists():
@@ -408,10 +500,6 @@ def load_dataset(path_value: str | Path, url_col: str | None = None, label_col: 
 
     CSV_PATH = csv_path
     PROGRESS_FILE = progress_path_for(csv_path)
-    _migrate_progress(
-        PROGRESS_FILE,
-        APP_DIR / ".progress" / f"{safe_filename(path_label(csv_path))}.txt",
-    )
     URL_COL = inferred_url_column(columns, url_col)
     LABEL_COL = inferred_label_column(columns, label_col)
     RUN_ID = new_run_id()
@@ -430,7 +518,7 @@ def load_dataset(path_value: str | Path, url_col: str | None = None, label_col: 
 def load_finetune_agent(agent_key: str, path_value: str | Path = DEFAULT_FINETUNE_JSON_PATH) -> None:
     global CSV_PATH, OUTPUT_KEEP, OUTPUT_DELETED, OUTPUT_RAW, OUTPUT_SKIP, PROGRESS_FILE, URL_COL, LABEL_COL, RUN_ID, DATASET_MODE
     global FINETUNE_JSON_PATH, FINETUNE_DATA, FINETUNE_GROUP_KEY, FINETUNE_AGENT_KEY
-    global df, kept_indices, deleted_indices, skipped_indices, start_index, ROW_ANNOTATIONS, FINETUNE_FILE_HASH
+    global df, kept_indices, deleted_indices, skipped_indices, start_index, ROW_ANNOTATIONS, FINETUNE_FILE_HASH, SESSION_DB_ID
 
     json_path = resolve_path(str(path_value))
     FINETUNE_FILE_HASH = file_content_hash(json_path)
@@ -458,16 +546,13 @@ def load_finetune_agent(agent_key: str, path_value: str | Path = DEFAULT_FINETUN
             }
         )
 
+    SESSION_DB_ID = None
     FINETUNE_JSON_PATH = json_path
     FINETUNE_DATA = source
     FINETUNE_GROUP_KEY = selected_group
     FINETUNE_AGENT_KEY = agent_key
     CSV_PATH = json_path
     PROGRESS_FILE = finetune_progress_path_for(json_path, agent_key)
-    _migrate_progress(
-        PROGRESS_FILE,
-        APP_DIR / ".progress" / f"{safe_filename(path_label(json_path))}__{safe_filename(agent_key)}.txt",
-    )
     URL_COL = "url"
     LABEL_COL = "expected"
     RUN_ID = new_run_id()
@@ -505,64 +590,277 @@ def _parse_progress_txt(text: str) -> dict:
     return data
 
 
-def load_progress() -> None:
-    global start_index, RUN_ID, ROW_ANNOTATIONS
+def _migrate_all_progress() -> dict:
+    """Scan all legacy .progress JSON/TXT files and import them into SQLite.
+    Returns a dict with 'migrated', 'failed', and 'skipped' lists."""
 
-    # Try JSON path; fall back to legacy .txt path for migration
-    path = PROGRESS_FILE
-    if not path.exists():
-        legacy = path.with_suffix(".txt")
-        if legacy.exists():
-            path = legacy
+    progress_dir = APP_DIR / ".progress"
+    results: dict[str, list] = {"migrated": [], "failed": [], "skipped": []}
+
+    # Collect candidate files from .progress/ dir and root-level defaults
+    candidate_files: list[Path] = []
+    if progress_dir.exists():
+        candidate_files.extend(progress_dir.glob("*.json"))
+        candidate_files.extend(progress_dir.glob("*.txt"))
+    for root_file in [DEFAULT_PROGRESS_FILE, DEFAULT_PROGRESS_FILE.with_suffix(".txt")]:
+        if root_file.exists() and root_file not in candidate_files:
+            candidate_files.append(root_file)
+
+    # Exclude already-migrated files
+    candidate_files = [f for f in candidate_files if ".migrated" not in f.suffixes and f.suffix != ".migrated"]
+
+    if not candidate_files:
+        results["message"] = (
+            f"Tidak ada file progress ditemukan.\n"
+            f"Letakkan file .json/.txt di: {progress_dir}\n"
+            f"atau file default di: {APP_DIR}"
+        )
+        results["expected_dir"] = str(progress_dir)
+        return results
+
+    # Build content-hash → csv_path lookup across data/ and uploads/
+    csv_hash_map: dict[str, Path] = {}
+    for search_dir in [DATA_DIR, APP_DIR / "uploads"]:
+        if not search_dir.exists():
+            continue
+        for csv_path in sorted(search_dir.rglob("*.csv")):
+            try:
+                h = file_content_hash(csv_path)
+                csv_hash_map.setdefault(h, csv_path)
+            except OSError:
+                pass
+
+    for prog_file in sorted(candidate_files):
+        stem = prog_file.stem
+
+        # Detect finetune files by the __ separator (not yet supported for bulk migrate)
+        if "__" in stem:
+            results["skipped"].append({
+                "file": prog_file.name,
+                "reason": "File finetune JSON tidak didukung untuk migrasi massal. Muat agen secara manual dari UI untuk memigrasinya.",
+            })
+            continue
+
+        # Default progress file → DEFAULT_CSV_PATH
+        is_default = prog_file.name in (".verifikasi_progress.json", ".verifikasi_progress.txt")
+        if is_default:
+            if not DEFAULT_CSV_PATH.exists():
+                results["failed"].append({
+                    "file": prog_file.name,
+                    "reason": f"File CSV default tidak ditemukan. Letakkan di: {DEFAULT_CSV_PATH}",
+                    "expected_file": str(DEFAULT_CSV_PATH),
+                })
+                continue
+            matched_csv = DEFAULT_CSV_PATH
+            ds_hash = file_content_hash(DEFAULT_CSV_PATH)
         else:
+            # Regular CSV progress: {safe_stem}_{hash8}
+            parts = stem.rsplit("_", 1)
+            ds_hash = parts[1] if len(parts) == 2 and len(parts[1]) == 8 else ""
+            matched_csv = csv_hash_map.get(ds_hash)
+            if not matched_csv:
+                results["failed"].append({
+                    "file": prog_file.name,
+                    "reason": (
+                        f"Tidak ada CSV dengan hash '{ds_hash}' ditemukan di folder data.\n"
+                        f"Letakkan file CSV yang sesuai di: {path_label(DATA_DIR)}"
+                    ),
+                    "expected_dir": path_label(DATA_DIR),
+                })
+                continue
+
+        ds_path = path_label(matched_csv)
+
+        # Check if already in SQLite
+        with get_db() as conn:
+            existing = conn.execute(
+                "SELECT id FROM sessions WHERE dataset_path=? AND dataset_hash=? AND finetune_agent_key=''",
+                (ds_path, ds_hash),
+            ).fetchone()
+            if existing:
+                results["skipped"].append({
+                    "file": prog_file.name,
+                    "reason": f"Dataset '{ds_path}' sudah ada di database (session id {existing['id']}).",
+                })
+                continue
+
+        # Parse progress file
+        try:
+            raw = prog_file.read_text(encoding="utf-8")
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data = _parse_progress_txt(raw)
+        except OSError as exc:
+            results["failed"].append({"file": prog_file.name, "reason": f"Gagal membaca file: {exc}"})
+            continue
+
+        run_id = str(data.get("run_id", new_run_id()))
+        current_index = int(data.get("current_index", 0))
+        approved = set(int(x) for x in data.get("approved", []))
+        rejected = set(int(x) for x in data.get("rejected", []))
+        skipped_set = set(int(x) for x in data.get("skipped", []))
+        raw_annotations = data.get("annotations", {})
+        annotations = {
+            int(k): {str(f): str(v) for f, v in ann.items()}
+            for k, ann in raw_annotations.items()
+            if isinstance(ann, dict)
+        }
+
+        try:
+            with get_db() as conn:
+                conn.execute("""
+                    INSERT OR IGNORE INTO sessions
+                    (dataset_path, dataset_hash, dataset_mode, finetune_agent_key,
+                     tagged_agent_key, tagged_group_key, format_preset, url_col, label_col, run_id, current_index)
+                    VALUES (?, ?, 'csv', '', '', '', '', '', '', ?, ?)
+                """, (ds_path, ds_hash, run_id, current_index))
+
+                session_row = conn.execute(
+                    "SELECT id FROM sessions WHERE dataset_path=? AND dataset_hash=? AND finetune_agent_key=''",
+                    (ds_path, ds_hash),
+                ).fetchone()
+
+                if not session_row:
+                    results["failed"].append({"file": prog_file.name, "reason": "Gagal membuat session di database."})
+                    continue
+
+                session_id = session_row["id"]
+                all_indices = approved | rejected | skipped_set | set(annotations.keys())
+                for idx in all_indices:
+                    status = (
+                        "approved" if idx in approved
+                        else "rejected" if idx in rejected
+                        else "skipped" if idx in skipped_set
+                        else "raw"
+                    )
+                    annotation = annotations.get(idx, {})
+                    conn.execute("""
+                        INSERT OR IGNORE INTO annotations
+                        (session_id, row_index, status, expected, category, description, agent_key, reviewer_notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        session_id, idx, status,
+                        annotation.get("expected", ""), annotation.get("category", ""),
+                        annotation.get("description", ""), annotation.get("agent_key", ""),
+                        annotation.get("reviewer_notes", ""),
+                    ))
+        except Exception as exc:
+            results["failed"].append({"file": prog_file.name, "reason": f"Error database: {exc}"})
+            continue
+
+        try:
+            prog_file.rename(prog_file.with_suffix(".migrated"))
+        except OSError:
+            pass
+
+        results["migrated"].append({
+            "file": prog_file.name,
+            "dataset": ds_path,
+            "annotations": len(all_indices),
+            "current_index": current_index,
+        })
+
+    return results
+
+
+def load_progress() -> None:
+    global start_index, RUN_ID, ROW_ANNOTATIONS, SESSION_DB_ID, CSV_TAG_AGENT_KEY, CSV_TAG_GROUP_KEY
+
+    ds_path, ds_hash, ft_agent = _session_key()
+    if not ds_path:
+        SESSION_DB_ID = None
+        return
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM sessions WHERE dataset_path=? AND dataset_hash=? AND finetune_agent_key=?",
+            (ds_path, ds_hash, ft_agent),
+        ).fetchone()
+
+        if not row:
+            SESSION_DB_ID = None
             return
 
-    raw = path.read_text(encoding="utf-8")
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        data = _parse_progress_txt(raw)
-        # Auto-migrate: save as JSON now that we've parsed it
-        _write_progress_json(PROGRESS_FILE, data)
+        SESSION_DB_ID = row["id"]
+        start_index = min(max(row["current_index"], 0), max(len(df) - 1, 0))
+        if row["run_id"]:
+            RUN_ID = row["run_id"]
 
-    if "current_index" in data:
-        start_index = min(max(int(data["current_index"]), 0), max(len(df) - 1, 0))
-    if "run_id" in data:
-        RUN_ID = safe_filename(str(data["run_id"]))
-    kept_indices.update(int(x) for x in data.get("approved", []))
-    deleted_indices.update(int(x) for x in data.get("rejected", []))
-    skipped_indices.update(int(x) for x in data.get("skipped", []))
-    raw_annotations = data.get("annotations", {})
-    ROW_ANNOTATIONS = {
-        int(idx): {str(k): str(v) for k, v in ann.items()}
-        for idx, ann in raw_annotations.items()
-        if isinstance(ann, dict)
-    }
+        # Restore tagged agent key across server restarts
+        if DATASET_MODE == "csv" and row["tagged_agent_key"]:
+            CSV_TAG_AGENT_KEY = row["tagged_agent_key"]
+            CSV_TAG_GROUP_KEY = row["tagged_group_key"] or infer_group_key(row["tagged_agent_key"])
 
-    valid = range(len(df))
-    kept_indices.intersection_update(valid)
-    deleted_indices.intersection_update(valid)
-    skipped_indices.intersection_update(valid)
-    ROW_ANNOTATIONS = {idx: value for idx, value in ROW_ANNOTATIONS.items() if idx in valid}
+        ann_rows = conn.execute(
+            "SELECT row_index, status, expected, category, description, agent_key, reviewer_notes "
+            "FROM annotations WHERE session_id=?",
+            (SESSION_DB_ID,),
+        ).fetchall()
 
-
-def _write_progress_json(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    valid = set(range(len(df)))
+    for ann_row in ann_rows:
+        idx = ann_row["row_index"]
+        if idx not in valid:
+            continue
+        status = ann_row["status"]
+        if status == "approved":
+            kept_indices.add(idx)
+        elif status == "rejected":
+            deleted_indices.add(idx)
+        elif status == "skipped":
+            skipped_indices.add(idx)
+        annotation: dict[str, str] = {}
+        for field in ("expected", "category", "description", "agent_key", "reviewer_notes"):
+            val = ann_row[field]
+            if val:
+                annotation[field] = val
+        if annotation:
+            ROW_ANNOTATIONS[idx] = annotation
 
 
 def save_progress(current_idx: int) -> None:
     global start_index
     start_index = current_idx
-    data = {
-        "current_index": current_idx,
-        "run_id": RUN_ID,
-        "approved": sorted(kept_indices),
-        "rejected": sorted(deleted_indices),
-        "skipped": sorted(skipped_indices),
-        "annotations": {str(k): v for k, v in sorted(ROW_ANNOTATIONS.items())},
-    }
-    _write_progress_json(PROGRESS_FILE, data)
+
+    try:
+        session_id = _ensure_session()
+    except RuntimeError:
+        return  # No dataset loaded
+
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE sessions SET current_index=?, run_id=?, last_accessed=datetime('now') WHERE id=?",
+            (current_idx, RUN_ID, session_id),
+        )
+        all_annotated = (kept_indices | deleted_indices | skipped_indices) | set(ROW_ANNOTATIONS.keys())
+        for idx in all_annotated:
+            status = (
+                "approved" if idx in kept_indices
+                else "rejected" if idx in deleted_indices
+                else "skipped" if idx in skipped_indices
+                else "raw"
+            )
+            annotation = ROW_ANNOTATIONS.get(idx, {})
+            conn.execute("""
+                INSERT INTO annotations
+                    (session_id, row_index, status, expected, category, description, agent_key, reviewer_notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, row_index) DO UPDATE SET
+                    status=excluded.status,
+                    expected=excluded.expected,
+                    category=excluded.category,
+                    description=excluded.description,
+                    agent_key=excluded.agent_key,
+                    reviewer_notes=excluded.reviewer_notes
+            """, (
+                session_id, idx, status,
+                annotation.get("expected", ""),
+                annotation.get("category", ""),
+                annotation.get("description", ""),
+                annotation.get("agent_key", ""),
+                annotation.get("reviewer_notes", ""),
+            ))
 
 
 def save_results() -> dict[str, object]:
@@ -688,7 +986,6 @@ def export_records(scope: str, export_format: str) -> dict[str, object]:
             for idx in sorted(indices):
                 record = row_to_labelling_record(idx)
 
-                # Determine agent key: prefer per-row annotation, then CSV column, then session tag
                 row_agent = ""
                 annotation = ROW_ANNOTATIONS.get(idx, {})
                 if annotation.get("agent_key"):
@@ -698,7 +995,7 @@ def export_records(scope: str, export_format: str) -> dict[str, object]:
                 if row_agent and (pd.isna(row_agent) or row_agent == "nan"):
                     row_agent = ""
                 if not row_agent:
-                    row_agent = CSV_TAG_AGENT_KEY  # fall back to session-level tag
+                    row_agent = CSV_TAG_AGENT_KEY
 
                 if row_agent:
                     row_group = infer_group_key(row_agent)
@@ -709,7 +1006,6 @@ def export_records(scope: str, export_format: str) -> dict[str, object]:
                 else:
                     flat_records.append(record)
 
-            # If nothing was grouped into agents, output as flat list
             if not any(output.values()) and flat_records:
                 output_path.write_text(json.dumps(flat_records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             else:
@@ -1007,9 +1303,15 @@ def reset_review(delete_outputs: bool = False) -> dict[str, object]:
     skipped_indices = set()
     ROW_ANNOTATIONS = {}
     start_index = 0
+    RUN_ID = new_run_id()
 
-    if PROGRESS_FILE.exists():
-        PROGRESS_FILE.unlink()
+    if SESSION_DB_ID is not None:
+        with get_db() as conn:
+            conn.execute("DELETE FROM annotations WHERE session_id=?", (SESSION_DB_ID,))
+            conn.execute(
+                "UPDATE sessions SET current_index=0, run_id=?, last_accessed=datetime('now') WHERE id=?",
+                (RUN_ID, SESSION_DB_ID),
+            )
 
     deleted_files = []
     if delete_outputs:
@@ -1018,7 +1320,6 @@ def reset_review(delete_outputs: bool = False) -> dict[str, object]:
                 path.unlink()
                 deleted_files.append(path_label(path))
 
-    RUN_ID = new_run_id()
     if DATASET_MODE == "finetune_json":
         OUTPUT_KEEP, OUTPUT_DELETED, OUTPUT_RAW, OUTPUT_SKIP = finetune_output_paths_for(CSV_PATH, FINETUNE_AGENT_KEY, RUN_ID)
     else:
@@ -1026,7 +1327,7 @@ def reset_review(delete_outputs: bool = False) -> dict[str, object]:
 
     return {
         "run_id": RUN_ID,
-        "progress_file": path_label(PROGRESS_FILE),
+        "db_path": str(DB_PATH),
         "deleted_outputs": deleted_files,
     }
 
@@ -1129,7 +1430,7 @@ def dataset_payload() -> dict[str, object]:
     return {
         "mode": DATASET_MODE,
         "format_preset": DATASET_FORMAT_PRESET,
-        "path": path_label(CSV_PATH),
+        "path": _current_dataset_path_label(),
         "columns": list(df.columns),
         "url_col": URL_COL,
         "label_col": LABEL_COL,
@@ -1145,7 +1446,7 @@ def dataset_payload() -> dict[str, object]:
             "all_categories": finetune_categories(),
             "descriptions": finetune_descriptions(FINETUNE_AGENT_KEY) if DATASET_MODE == "finetune_json" else [],
         },
-        "progress_file": path_label(PROGRESS_FILE),
+        "progress_file": str(DB_PATH),
         "start_index": start_index,
         "curated_categories": CURATED_CATEGORIES,
         "outputs": {
@@ -1162,7 +1463,7 @@ def index() -> str:
     return render_template(
         "index.html",
         config={
-            "csv_path": str(CSV_PATH),
+            "csv_path": _current_dataset_path_label(),
             "url_col": URL_COL,
             "label_col": LABEL_COL,
             "start_index": start_index,
@@ -1233,6 +1534,18 @@ def api_tag_agent() -> Response:
 
     CSV_TAG_AGENT_KEY = agent_key
     CSV_TAG_GROUP_KEY = group_key
+
+    # Persist to SQLite so agent key survives server restarts
+    try:
+        session_id = _ensure_session()
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE sessions SET tagged_agent_key=?, tagged_group_key=?, last_accessed=datetime('now') WHERE id=?",
+                (agent_key, group_key, session_id),
+            )
+    except RuntimeError:
+        pass
+
     return jsonify({"row": get_row_payload(start_index), "dataset": dataset_payload()})
 
 
@@ -1347,8 +1660,6 @@ def api_action() -> Response:
         return jsonify({"error": f"Unknown action: {action}"}), 400
 
     if idx >= len(df):
-        if PROGRESS_FILE.exists():
-            PROGRESS_FILE.unlink()
         return jsonify({"finished": True, "saved": save_results(), "row": get_row_payload(len(df) - 1)})
 
     idx = max(idx, 0)
@@ -1432,10 +1743,40 @@ def api_format_presets() -> Response:
     return jsonify({"presets": FORMAT_PRESETS})
 
 
-try:
-    load_dataset(DEFAULT_CSV_PATH, DEFAULT_URL_COL, DEFAULT_LABEL_COL)
-except FileNotFoundError:
-    pass  # Start with empty state — user will pick a file via UI
+@app.get("/api/sessions/last")
+def api_sessions_last() -> Response:
+    """Return the most-recently accessed session so the frontend can offer to resume it."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM sessions ORDER BY last_accessed DESC LIMIT 1"
+        ).fetchone()
+
+    if not row:
+        return jsonify({"session": None})
+
+    return jsonify({
+        "session": {
+            "dataset_path": row["dataset_path"],
+            "dataset_mode": row["dataset_mode"],
+            "finetune_agent_key": row["finetune_agent_key"],
+            "tagged_agent_key": row["tagged_agent_key"],
+            "format_preset": row["format_preset"],
+            "url_col": row["url_col"],
+            "label_col": row["label_col"],
+            "current_index": row["current_index"],
+            "last_accessed": row["last_accessed"],
+        }
+    })
+
+
+@app.post("/api/migrate/all")
+def api_migrate_all() -> Response:
+    """Scan legacy .progress JSON/TXT files and import them into SQLite."""
+    results = _migrate_all_progress()
+    return jsonify(results)
+
+
+init_db()
 
 
 if __name__ == "__main__":

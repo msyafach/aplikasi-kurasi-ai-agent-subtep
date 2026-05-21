@@ -990,16 +990,150 @@ window.addEventListener("online", () => {
   elements.message.textContent = "Koneksi kembali.";
 });
 
+function showResumeSessionBanner(session) {
+  const banner = document.getElementById("resumeSessionBanner");
+  if (!banner) return;
+  const agentPart = session.tagged_agent_key ? ` | Agent: ${session.tagged_agent_key}` : "";
+  const posPart = ` (posisi ${(session.current_index || 0) + 1})`;
+  document.getElementById("resumeSessionLabel").textContent =
+    `Session terakhir: ${session.dataset_path}${agentPart}${posPart}`;
+  banner.hidden = false;
+
+  document.getElementById("resumeSessionBtn").onclick = async () => {
+    banner.hidden = true;
+    await doResumeSession(session);
+  };
+  document.getElementById("dismissSessionBanner").onclick = () => {
+    banner.hidden = true;
+    elements.message.textContent = "Pilih format lalu upload file CSV, atau pilih dari dropdown Dataset.";
+  };
+}
+
+async function doResumeSession(session) {
+  setBusy(true);
+  elements.message.textContent = "Melanjutkan session terakhir...";
+  try {
+    if (session.format_preset && elements.formatPreset) {
+      elements.formatPreset.value = session.format_preset;
+      elements.formatPreset.dispatchEvent(new Event("change"));
+    }
+    elements.datasetPath.value = session.dataset_path;
+
+    const response = await fetch("/api/dataset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path: session.dataset_path,
+        url_col: session.url_col,
+        label_col: session.label_col,
+        format_preset: session.format_preset,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Gagal memuat dataset");
+
+    datasetLoaded = true;
+    currentFormatPreset = session.format_preset || "";
+    renderDataset(payload.dataset);
+    renderRow(payload.row);
+    elements.message.textContent = `Session dilanjutkan dari baris ${payload.row.row_number}.`;
+  } catch (error) {
+    elements.message.textContent = `Gagal melanjutkan session: ${error.message}. Silakan pilih dataset manual.`;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function migrateAll() {
+  const btn = document.getElementById("migrateBtn");
+  const status = document.getElementById("migrateStatus");
+  const panel = document.getElementById("migrateResultPanel");
+  const content = document.getElementById("migrateResultContent");
+
+  btn.disabled = true;
+  status.textContent = "Memindai file progress lama...";
+  panel.hidden = true;
+
+  try {
+    const res = await fetch("/api/migrate/all", { method: "POST" });
+    const data = await res.json();
+
+    const lines = [];
+
+    if (data.message) {
+      lines.push(data.message);
+      if (data.expected_dir) lines.push(`\nLetakkan file .json/.txt di:\n  ${data.expected_dir}`);
+    }
+
+    if (data.migrated && data.migrated.length > 0) {
+      lines.push(`\n✓ Berhasil dimigrasikan (${data.migrated.length}):`);
+      data.migrated.forEach((m) => {
+        lines.push(`  • ${m.file} → ${m.dataset} (${m.annotations} anotasi, posisi ${m.current_index})`);
+      });
+    }
+
+    if (data.skipped && data.skipped.length > 0) {
+      lines.push(`\n↷ Dilewati (${data.skipped.length}):`);
+      data.skipped.forEach((s) => lines.push(`  • ${s.file}: ${s.reason}`));
+    }
+
+    if (data.failed && data.failed.length > 0) {
+      lines.push(`\n✗ Gagal (${data.failed.length}):`);
+      data.failed.forEach((f) => {
+        lines.push(`  • ${f.file}: ${f.reason}`);
+        if (f.expected_file) lines.push(`    → Letakkan file CSV di: ${f.expected_file}`);
+        if (f.expected_dir) lines.push(`    → Letakkan file CSV di folder: ${f.expected_dir}`);
+      });
+    }
+
+    content.textContent = lines.join("\n").trim();
+    document.getElementById("migrateResultTitle").textContent =
+      data.migrated && data.migrated.length > 0
+        ? `Migrasi selesai — ${data.migrated.length} dataset dipindahkan`
+        : "Hasil Migrasi";
+    panel.hidden = false;
+
+    const total = (data.migrated || []).length;
+    const failed = (data.failed || []).length;
+    status.textContent = total > 0
+      ? `${total} dataset dimigrasikan${failed > 0 ? `, ${failed} gagal` : ""}.`
+      : failed > 0
+        ? `Migrasi gagal untuk ${failed} file.`
+        : "Tidak ada file untuk dimigrasikan.";
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("migrateBtn").addEventListener("click", migrateAll);
+document.getElementById("closeMigrateResult").addEventListener("click", () => {
+  document.getElementById("migrateResultPanel").hidden = true;
+});
+
 loadFormatPresets()
   .then(() => loadDatasets())
   .then(() => loadFinetuneMeta())
-  .then(() => {
-    // If no dataset loaded (empty state), skip loadRow and show prompt
-    if (currentIndex === 0 && !window.APP_CONFIG?.dataset?.path) {
-      elements.message.textContent = "Pilih format lalu upload file CSV, atau pilih dari dropdown Dataset.";
-      return;
+  .then(async () => {
+    // If the server already has a dataset loaded (server still running after browser refresh),
+    // continue from the current position directly.
+    if (window.APP_CONFIG?.dataset?.path) {
+      datasetLoaded = true;
+      return loadRow(currentIndex);
     }
-    return loadRow(currentIndex);
+    // Server has no dataset — check SQLite for the most recent session and offer to resume.
+    try {
+      const res = await fetch("/api/sessions/last");
+      const payload = await res.json();
+      if (payload.session && payload.session.dataset_path) {
+        showResumeSessionBanner(payload.session);
+      } else {
+        elements.message.textContent = "Pilih format lalu upload file CSV, atau pilih dari dropdown Dataset.";
+      }
+    } catch (_) {
+      elements.message.textContent = "Pilih format lalu upload file CSV, atau pilih dari dropdown Dataset.";
+    }
   })
   .catch((error) => {
     elements.message.textContent = `Gagal memuat konfigurasi: ${error.message}`;
