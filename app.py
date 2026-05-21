@@ -1574,9 +1574,6 @@ def analyze_image_metadata(image_bytes: bytes) -> dict:
         if profile_desc and "srgb" not in profile_desc:
             flags.append(f"ℹ Profil warna non-standar: {flat.get('ProfileDescription', '')}")
 
-        has_camera_meta = any(flat.get(k) for k in ("Make", "Model", "DateTimeOriginal", "Software", "GPSLatitude"))
-        if not has_camera_meta:
-            flags.append("ℹ Tidak ada metadata kamera — foto dari HP/kamera biasanya memiliki EXIF (Make, Model, dll.)")
 
         if flat.get("FileType", "").upper() == "PNG":
             flags.append("ℹ Format PNG — umum untuk screenshot atau hasil editing/AI")
