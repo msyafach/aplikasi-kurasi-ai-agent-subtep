@@ -209,16 +209,27 @@ Format untuk **evaluasi dan testing model verifikasi**. Setiap record mengandung
 [
   {
     "web_registerasi_detail_id": "12345",
+    "web_register_id": "6789",
     "police_number": "B1234XYZ",
-    "expected": "REJECTED",
+    "nomor_rangka": "MHFXX...",
+    "stnk_photo": "",
+    "vehicle_photo": "https://...",
+    "fuel_oil_type": "Bensin",
+    "wheel_count": "4",
+    "cubicle_centimeter": "1500",
+    "plate_color": "Hitam",
     "mapped_rejection_code": "C-01",
     "mapped_rejection_category": "Nopol tidak cocok",
-    "description": "Nomor polisi pada foto tidak cocok"
+    "mapped_rejection_message": "",
+    "expected": "REJECTED",
+    "description": "Nomor polisi pada foto tidak cocok",
+    "is_valid_verifikasi_ulang": null,
+    "status": "REJECTED"
   }
 ]
 ```
 
-Kode penolakan (`mapped_rejection_code`) dipetakan otomatis dari kategori yang dipilih reviewer.
+Kode penolakan (`mapped_rejection_code`) dipetakan otomatis dari kategori yang dipilih reviewer, misalnya `Nopol tidak cocok` → `C-01`, `STNK buram` → `K-03`.
 
 ---
 
