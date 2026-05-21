@@ -14,7 +14,7 @@ import pandas as pd
 import requests
 from flask import Flask, Response, jsonify, render_template, request
 import exiftool
-from PIL import Image, ImageChops, ImageEnhance
+from PIL import Image, ImageChops, ImageEnhance, ImageFilter
 
 # Resolve ExifTool executable: try PATH first, then known install location
 _EXIFTOOL_CANDIDATES = [
@@ -1471,6 +1471,19 @@ def compute_saturation_heatmap(image_bytes: bytes, amplify: int = 5) -> bytes:
     return out.getvalue()
 
 
+def compute_noise_map(image_bytes: bytes, amplify: int = 5) -> bytes:
+    """High-pass noise map: diff between image and its Gaussian blur.
+    Inconsistent noise patterns across regions indicate copy-paste from different sources."""
+    img = Image.open(BytesIO(image_bytes)).convert("RGB")
+    img.thumbnail((1200, 1200))
+    blurred = img.filter(ImageFilter.GaussianBlur(radius=2))
+    noise = ImageChops.difference(img, blurred)
+    noise = noise.point(lambda x: min(x * amplify, 255))
+    out = BytesIO()
+    noise.save(out, "JPEG", quality=92)
+    return out.getvalue()
+
+
 def compute_ela(image_bytes: bytes, quality: int = 95, amplify: int = 15) -> bytes:
     """Error Level Analysis: re-compress then diff. Bright areas = likely edited."""
     original = Image.open(BytesIO(image_bytes)).convert("RGB")
@@ -1965,6 +1978,23 @@ def api_forensic_ela(idx: int) -> Response:
         raw = fetch_raw_bytes(url)
         ela_bytes = compute_ela(raw, quality=quality, amplify=amplify)
         return Response(ela_bytes, mimetype="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.get("/api/forensic/noise/<int:idx>")
+def api_forensic_noise(idx: int) -> Response:
+    if df.empty or idx < 0 or idx >= len(df):
+        return jsonify({"error": "Index tidak valid"}), 400
+    url = safe_value(df.iloc[idx].get(URL_COL, ""))
+    if not url:
+        return jsonify({"error": "Tidak ada URL gambar untuk baris ini"}), 400
+    try:
+        amplify = min(max(int(request.args.get("amplify", 5)), 1), 20)
+        raw = fetch_raw_bytes(url)
+        noise_bytes = compute_noise_map(raw, amplify=amplify)
+        return Response(noise_bytes, mimetype="image/jpeg",
                         headers={"Cache-Control": "no-store"})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

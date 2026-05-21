@@ -235,6 +235,14 @@
             </label>
             <button type="button" id="satRefresh" class="secondary">Refresh</button>
           </div>
+          <div id="noiseControls" style="display:none">
+            <label class="forensic-slider-label">
+              Amplifikasi
+              <input type="range" id="noiseAmplify" min="1" max="20" value="5" step="1">
+              <span id="noiseAmplifyVal">5</span>&times;
+            </label>
+            <button type="button" id="noiseRefresh" class="secondary">Refresh</button>
+          </div>
           <button type="button" id="closeForensic" class="secondary">Tutup</button>
         </div>
         <div class="forensic-body">
@@ -242,6 +250,7 @@
             <div class="forensic-tab-bar">
               <button type="button" class="forensic-tab active" data-tab="ela">ELA</button>
               <button type="button" class="forensic-tab" data-tab="sat">Saturasi Warna</button>
+              <button type="button" class="forensic-tab" data-tab="noise">Noise</button>
             </div>
             <div id="elaView">
               <p class="forensic-hint">
@@ -261,6 +270,15 @@
               <div id="satSpinner" class="forensic-spinner" hidden></div>
               <img id="satImage" class="forensic-ela-img" alt="Saturasi" hidden>
               <p id="satError" class="forensic-error" hidden></p>
+            </div>
+            <div id="noiseView" hidden>
+              <p class="forensic-hint">
+                <strong>Noise Map</strong> — pola tekstur/noise per-pixel (selisih gambar asli vs versi blur).
+                Area yang memiliki <span style="color:#e00">pola noise berbeda</span> dari sekitarnya mengindikasikan konten yang disisipkan dari sumber gambar lain, termasuk editan di area gelap.
+              </p>
+              <div id="noiseSpinner" class="forensic-spinner" hidden></div>
+              <img id="noiseImage" class="forensic-ela-img" alt="Noise" hidden>
+              <p id="noiseError" class="forensic-error" hidden></p>
             </div>
           </div>
           <div class="forensic-meta-col">

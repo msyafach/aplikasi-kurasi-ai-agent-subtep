@@ -103,6 +103,14 @@ const elements = {
   satRefresh: document.getElementById("satRefresh"),
   satControls: document.getElementById("satControls"),
   satView: document.getElementById("satView"),
+  noiseImage: document.getElementById("noiseImage"),
+  noiseError: document.getElementById("noiseError"),
+  noiseSpinner: document.getElementById("noiseSpinner"),
+  noiseAmplify: document.getElementById("noiseAmplify"),
+  noiseAmplifyVal: document.getElementById("noiseAmplifyVal"),
+  noiseRefresh: document.getElementById("noiseRefresh"),
+  noiseControls: document.getElementById("noiseControls"),
+  noiseView: document.getElementById("noiseView"),
   closeForensic: document.getElementById("closeForensic"),
   metaContent: document.getElementById("metaContent"),
   metaSpinner: document.getElementById("metaSpinner"),
@@ -1222,6 +1230,28 @@ async function loadSaturation() {
   }
 }
 
+async function loadNoise() {
+  const amplify = elements.noiseAmplify.value;
+  elements.noiseSpinner.hidden = false;
+  elements.noiseImage.hidden = true;
+  elements.noiseError.hidden = true;
+  try {
+    const res = await fetch(`/api/forensic/noise/${currentIndex}?amplify=${amplify}&_=${Date.now()}`);
+    if (!res.ok) {
+      const d = await res.json();
+      throw new Error(d.error || "Gagal memuat");
+    }
+    const blob = await res.blob();
+    elements.noiseImage.src = URL.createObjectURL(blob);
+    elements.noiseImage.hidden = false;
+  } catch (err) {
+    elements.noiseError.textContent = err.message;
+    elements.noiseError.hidden = false;
+  } finally {
+    elements.noiseSpinner.hidden = true;
+  }
+}
+
 document.querySelectorAll(".forensic-tab").forEach(btn => {
   btn.addEventListener("click", () => {
     const tab = btn.dataset.tab;
@@ -1229,8 +1259,10 @@ document.querySelectorAll(".forensic-tab").forEach(btn => {
     btn.classList.add("active");
     elements.elaView.hidden = tab !== "ela";
     elements.satView.hidden = tab !== "sat";
+    elements.noiseView.hidden = tab !== "noise";
     elements.elaControls.style.display = tab === "ela" ? "contents" : "none";
     elements.satControls.style.display = tab === "sat" ? "contents" : "none";
+    elements.noiseControls.style.display = tab === "noise" ? "contents" : "none";
   });
 });
 
@@ -1239,10 +1271,15 @@ elements.satAmplify.addEventListener("input", () => {
 });
 elements.satRefresh.addEventListener("click", loadSaturation);
 
+elements.noiseAmplify.addEventListener("input", () => {
+  elements.noiseAmplifyVal.textContent = elements.noiseAmplify.value;
+});
+elements.noiseRefresh.addEventListener("click", loadNoise);
+
 async function openForensic() {
   elements.forensicPanel.hidden = false;
   forensicLoadedIdx = currentIndex;
-  await Promise.all([loadEla(), loadSaturation(), loadMeta()]);
+  await Promise.all([loadEla(), loadSaturation(), loadNoise(), loadMeta()]);
 }
 
 elements.forensicBtn.addEventListener("click", async () => {
