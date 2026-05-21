@@ -71,6 +71,7 @@ const elements = {
   buttons: Array.from(document.querySelectorAll("button[data-action]")),
   filterScope: document.getElementById("filterScope"),
   filterNoCategory: document.getElementById("filterNoCategory"),
+  filterMismatch: document.getElementById("filterMismatch"),
   applyFilter: document.getElementById("applyFilter"),
   resumeLabeling: document.getElementById("resumeLabeling"),
   clearFilter: document.getElementById("clearFilter"),
@@ -484,8 +485,9 @@ function updateFilterUi() {
   if (active) {
     const scopeLabel = elements.filterScope.value || "Semua";
     const noCatLabel = elements.filterNoCategory.checked ? " + Kategori kosong" : "";
+    const mismatchLabel = elements.filterMismatch.checked ? " + Berbeda dari label asal" : "";
     elements.filterStatus.textContent =
-      `Filter aktif: ${scopeLabel}${noCatLabel} (${filterIndices.length} item, posisi ${filterPos + 1}/${filterIndices.length})`;
+      `Filter aktif: ${scopeLabel}${noCatLabel}${mismatchLabel} (${filterIndices.length} item, posisi ${filterPos + 1}/${filterIndices.length})`;
   } else {
     elements.filterStatus.textContent = "";
   }
@@ -494,8 +496,9 @@ function updateFilterUi() {
 async function applyFilter() {
   const scope = elements.filterScope.value;
   const noCategory = elements.filterNoCategory.checked;
-  console.log(`[applyFilter] scope="${scope}" noCategory=${noCategory} | currentIndex=${currentIndex} resumeIndex=${resumeIndex}`);
-  if (!scope && !noCategory) { await resumeLabeling(); return; }
+  const mismatch = elements.filterMismatch.checked;
+  console.log(`[applyFilter] scope="${scope}" noCategory=${noCategory} mismatch=${mismatch} | currentIndex=${currentIndex} resumeIndex=${resumeIndex}`);
+  if (!scope && !noCategory && !mismatch) { await resumeLabeling(); return; }
 
   // Snapshot the current labeling position before entering filter mode
   resumeIndex = currentIndex;
@@ -505,6 +508,7 @@ async function applyFilter() {
   try {
     const params = new URLSearchParams({ scope });
     if (noCategory) params.set("no_category", "1");
+    if (mismatch) params.set("mismatch", "1");
     const res = await fetch(`/api/scope/indices?${params}`);
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error || "Gagal memuat filter");
@@ -539,6 +543,7 @@ function clearFilter() {
   filterPos = 0;
   elements.filterScope.value = "";
   elements.filterNoCategory.checked = false;
+  elements.filterMismatch.checked = false;
   updateFilterUi();
   elements.message.textContent = "Filter dihapus.";
 }

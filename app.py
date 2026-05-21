@@ -1863,10 +1863,28 @@ def update_annotation(idx: int, annotation: dict[str, object] | None) -> None:
     ROW_ANNOTATIONS[idx] = current
 
 
+def _normalize_verdict(s: str) -> str:
+    s = s.upper().strip()
+    if s == "APPROVED": return "APPROVED"
+    if s == "REJECTED": return "REJECTED"
+    if s in ("SKIP", "SKIPPED"): return "SKIP"
+    return s
+
+
+def _is_mismatch(idx: int) -> bool:
+    status = row_status(idx)
+    if status == "raw":
+        return False
+    orig = _normalize_verdict(safe_value(df.iloc[idx].get(LABEL_COL, "")))
+    review = _normalize_verdict({"approved": "APPROVED", "rejected": "REJECTED", "skipped": "SKIP"}.get(status, ""))
+    return bool(orig and review and orig != review)
+
+
 @app.get("/api/scope/indices")
 def api_scope_indices() -> Response:
     scope = request.args.get("scope", "all")
     no_category = request.args.get("no_category", "0") == "1"
+    mismatch = request.args.get("mismatch", "0") == "1"
     effective_scope = scope if scope else "reviewed"
     try:
         indices = sorted(indices_for_scope(effective_scope))
@@ -1874,6 +1892,8 @@ def api_scope_indices() -> Response:
         return jsonify({"error": str(exc)}), 400
     if no_category:
         indices = [idx for idx in indices if not ROW_ANNOTATIONS.get(idx, {}).get("category", "").strip()]
+    if mismatch:
+        indices = [idx for idx in indices if _is_mismatch(idx)]
     return jsonify({"scope": scope, "indices": indices, "count": len(indices)})
 
 
