@@ -200,8 +200,8 @@
               <textarea id="reviewerNotesText" rows="3" spellcheck="false" placeholder="Catatan opsional..."></textarea>
             </dd>
 
-            <dt class="dashboard-field">URL</dt>
-            <dd class="dashboard-field"><a id="sourceUrl" href="#" target="_blank" rel="noreferrer">-</a></dd>
+            <dt>URL Gambar</dt>
+            <dd><a id="sourceUrl" href="#" target="_blank" rel="noreferrer noopener" style="word-break:break-all">-</a></dd>
             <dt class="dashboard-field">STNK Reading</dt>
             <dd class="dashboard-field"><div id="stnkReading" class="reading-grid"></div></dd>
             <dt class="dashboard-field">Vehicle Reading</dt>
@@ -211,14 +211,49 @@
         </aside>
       </section>
 
+      <section id="forensicPanel" class="forensic-panel" hidden>
+        <div class="forensic-toolbar">
+          <strong>Analisis Forensik</strong>
+          <label class="forensic-slider-label">
+            Kualitas re-kompresi
+            <input type="range" id="elaQuality" min="50" max="99" value="95" step="1">
+            <span id="elaQualityVal">95</span>%
+          </label>
+          <label class="forensic-slider-label">
+            Amplifikasi
+            <input type="range" id="elaAmplify" min="1" max="50" value="15" step="1">
+            <span id="elaAmplifyVal">15</span>&times;
+          </label>
+          <button type="button" id="elaRefresh" class="secondary">Refresh ELA</button>
+          <button type="button" id="closeForensic" class="secondary">Tutup</button>
+        </div>
+        <div class="forensic-body">
+          <div class="forensic-ela-col">
+            <p class="forensic-hint">
+              <strong>ELA (Error Level Analysis)</strong> — area <span style="color:#e00">terang/merah</span> mengindikasikan kemungkinan editan.
+              Area gelap = kompresi konsisten (lebih alami).
+            </p>
+            <div id="elaSpinner" class="forensic-spinner" hidden></div>
+            <img id="elaImage" class="forensic-ela-img" alt="ELA" hidden>
+            <p id="elaError" class="forensic-error" hidden></p>
+          </div>
+          <div class="forensic-meta-col">
+            <div id="metaSpinner" class="forensic-spinner" hidden></div>
+            <div id="metaContent"></div>
+          </div>
+        </div>
+      </section>
+
       <section class="actions">
-        <button type="button" data-action="back" class="secondary">Back</button>
-        <button type="button" data-action="approve">APPROVED</button>
-        <button type="button" data-action="reject" class="danger">REJECTED</button>
-        <button type="button" data-action="skip" class="secondary">Skip</button>
+        <button type="button" data-action="back" class="secondary">Back <kbd>←</kbd></button>
+        <button type="button" data-action="next" class="secondary" id="nextBtn">Next <kbd>→</kbd></button>
+        <button type="button" data-action="approve">APPROVED <kbd>1</kbd></button>
+        <button type="button" data-action="reject" class="danger">REJECTED <kbd>2</kbd></button>
+        <button type="button" data-action="skip" class="secondary">Skip <kbd>3</kbd></button>
         <button type="button" data-action="save" class="secondary">Simpan</button>
         <button type="button" data-action="stop" class="secondary">Stop & Simpan</button>
         <button type="button" id="continueBtn" class="secondary" hidden>Lanjutkan</button>
+        <button type="button" id="forensicBtn" class="secondary">Forensik</button>
       </section>
 
       <section id="message" class="message" aria-live="polite"></section>

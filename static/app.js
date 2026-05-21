@@ -13,6 +13,7 @@ let filterPos = 0;
 let resumeIndex = window.APP_CONFIG.startIndex || 0;
 let suppressNextImageError = false;
 let selectedCategories = [];
+let currentRowStatus = "raw";
 
 console.log(`[INIT] currentIndex=${currentIndex}, resumeIndex=${resumeIndex}`);
 
@@ -81,6 +82,20 @@ const elements = {
   reviewerNotesText: document.getElementById("reviewerNotesText"),
   agentKeyColLabel: document.getElementById("agentKeyColLabel"),
   agentKeyColSelect: document.getElementById("agentKeyColSelect"),
+  nextBtn: document.getElementById("nextBtn"),
+  forensicBtn: document.getElementById("forensicBtn"),
+  forensicPanel: document.getElementById("forensicPanel"),
+  elaImage: document.getElementById("elaImage"),
+  elaError: document.getElementById("elaError"),
+  elaSpinner: document.getElementById("elaSpinner"),
+  elaQuality: document.getElementById("elaQuality"),
+  elaQualityVal: document.getElementById("elaQualityVal"),
+  elaAmplify: document.getElementById("elaAmplify"),
+  elaAmplifyVal: document.getElementById("elaAmplifyVal"),
+  elaRefresh: document.getElementById("elaRefresh"),
+  closeForensic: document.getElementById("closeForensic"),
+  metaContent: document.getElementById("metaContent"),
+  metaSpinner: document.getElementById("metaSpinner"),
   retryImage: document.getElementById("retryImage"),
   formatPreset: document.getElementById("formatPreset"),
   uploadFile: document.getElementById("uploadFile"),
@@ -106,6 +121,7 @@ function updateButtonStates() {
   elements.categoryInput.disabled = fieldsDisabled;
   elements.descriptionSelect.disabled = fieldsDisabled;
   elements.descriptionText.disabled = fieldsDisabled;
+  elements.nextBtn.disabled = actionsDisabled || currentRowStatus === "raw";
   elements.loadDataset.disabled = apiBusy;
   elements.resetReview.disabled = apiBusy;
   elements.resetAndDeleteOutputs.disabled = apiBusy;
@@ -360,6 +376,7 @@ function renderRow(row, { preserveResume = false } = {}) {
     elements.indexLabel.textContent = `${row.row_number} / ${row.total}`;
   }
 
+  currentRowStatus = row.status || "raw";
   elements.reviewStatus.textContent = statusText(row.status);
   elements.nopol.textContent = row.nopol || "-";
   elements.label.textContent = row.label || "-";
@@ -1005,12 +1022,17 @@ async function loadFormatPresets() {
 }
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) {
+    event.target.blur();
+    return;
+  }
   if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === "ArrowLeft") sendAction("back");
-  if (event.key === "ArrowRight") sendAction("skip");
-  if (event.key.toLowerCase() === "a") sendAction("approve");
-  if (event.key.toLowerCase() === "r") sendAction("reject");
-  if (event.key.toLowerCase() === "s") sendAction("save");
+  if (event.key === "ArrowRight" && currentRowStatus !== "raw") sendAction("next");
+  if (event.key === "1") sendAction("approve");
+  if (event.key === "2") sendAction("reject");
+  if (event.key === "3") sendAction("skip");
 });
 
 elements.retryImage.addEventListener("click", () => {
@@ -1087,6 +1109,113 @@ async function doResumeSession(session) {
     setBusy(false);
   }
 }
+
+// ---- Forensic panel ----
+
+let forensicLoadedIdx = null;
+
+async function loadEla() {
+  const idx = currentIndex;
+  const quality = elements.elaQuality.value;
+  const amplify = elements.elaAmplify.value;
+  elements.elaSpinner.hidden = false;
+  elements.elaImage.hidden = true;
+  elements.elaError.hidden = true;
+  try {
+    const url = `/api/forensic/ela/${idx}?quality=${quality}&amplify=${amplify}&_=${Date.now()}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || "Gagal memuat ELA");
+    }
+    const blob = await res.blob();
+    elements.elaImage.src = URL.createObjectURL(blob);
+    elements.elaImage.hidden = false;
+  } catch (err) {
+    elements.elaError.textContent = err.message;
+    elements.elaError.hidden = false;
+  } finally {
+    elements.elaSpinner.hidden = true;
+  }
+}
+
+async function loadMeta() {
+  elements.metaSpinner.hidden = false;
+  elements.metaContent.innerHTML = "";
+  try {
+    const res = await fetch(`/api/forensic/meta/${currentIndex}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Gagal memuat metadata");
+
+    const riskClass = data.risk || "rendah";
+    let html = `<p style="margin:0 0 10px"><strong>Risiko: </strong><span class="forensic-risk ${riskClass}">${riskClass.toUpperCase()}</span></p>`;
+    if (data.error) {
+      html += `<p class="forensic-error" style="margin:0 0 10px">⚠ ExifTool: ${data.error}</p>`;
+    }
+
+    if (data.flags && data.flags.length > 0) {
+      html += `<ul class="forensic-flags">${data.flags.map(f => `<li>${f}</li>`).join("")}</ul>`;
+    } else {
+      html += `<p style="color:var(--muted);font-size:13px">Tidak ada indikator mencurigakan terdeteksi.</p>`;
+    }
+
+    const fileInfo = data.file_info || {};
+    if (Object.keys(fileInfo).length > 0) {
+      html += `<p style="margin:12px 0 4px;font-weight:600;font-size:13px">Info File</p>
+        <table class="forensic-meta-table"><tbody>
+        ${Object.entries(fileInfo).map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("")}
+        </tbody></table>`;
+    }
+
+    const groups = data.groups || {};
+    const groupNames = Object.keys(groups);
+    if (groupNames.length > 0) {
+      for (const ns of groupNames) {
+        const entries = Object.entries(groups[ns]);
+        if (entries.length === 0) continue;
+        html += `<p style="margin:12px 0 4px;font-weight:600;font-size:13px">${ns}</p>
+          <table class="forensic-meta-table"><tbody>
+          ${entries.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("")}
+          </tbody></table>`;
+      }
+    } else {
+      html += `<p style="margin:12px 0 0;font-size:13px;color:var(--muted)">Tidak ada data metadata.</p>`;
+    }
+
+    elements.metaContent.innerHTML = html;
+  } catch (err) {
+    elements.metaContent.innerHTML = `<p class="forensic-error">${err.message}</p>`;
+  } finally {
+    elements.metaSpinner.hidden = true;
+  }
+}
+
+async function openForensic() {
+  elements.forensicPanel.hidden = false;
+  forensicLoadedIdx = currentIndex;
+  await Promise.all([loadEla(), loadMeta()]);
+}
+
+elements.forensicBtn.addEventListener("click", async () => {
+  if (!elements.forensicPanel.hidden && forensicLoadedIdx === currentIndex) {
+    elements.forensicPanel.hidden = true;
+    return;
+  }
+  await openForensic();
+});
+
+elements.closeForensic.addEventListener("click", () => {
+  elements.forensicPanel.hidden = true;
+});
+
+elements.elaRefresh.addEventListener("click", loadEla);
+
+elements.elaQuality.addEventListener("input", () => {
+  elements.elaQualityVal.textContent = elements.elaQuality.value;
+});
+elements.elaAmplify.addEventListener("input", () => {
+  elements.elaAmplifyVal.textContent = elements.elaAmplify.value;
+});
 
 async function migrateAll() {
   const btn = document.getElementById("migrateBtn");

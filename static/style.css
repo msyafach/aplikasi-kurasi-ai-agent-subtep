@@ -402,6 +402,22 @@ button:disabled {
   opacity: 0.55;
 }
 
+button kbd {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 1px 5px;
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 3px;
+  background: rgba(0,0,0,0.15);
+  font: 11px/1.4 monospace;
+  vertical-align: middle;
+}
+
+button.secondary kbd {
+  border-color: rgba(0,0,0,0.2);
+  background: rgba(0,0,0,0.06);
+}
+
 /* File upload styled as a secondary button */
 .upload-label {
   display: flex;
@@ -477,6 +493,135 @@ button:disabled {
   font-size: 13px;
   line-height: 1.45;
   white-space: pre-wrap;
+}
+
+.forensic-panel {
+  margin-bottom: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.forensic-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #f0f4ff;
+  border-bottom: 1px solid var(--border);
+}
+
+.forensic-slider-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.forensic-slider-label input[type="range"] {
+  width: 90px;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.forensic-body {
+  display: flex;
+  gap: 0;
+}
+
+.forensic-ela-col {
+  flex: 1;
+  padding: 14px;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+
+.forensic-meta-col {
+  width: 320px;
+  flex-shrink: 0;
+  padding: 14px;
+  font-size: 13px;
+  overflow-y: auto;
+  max-height: 480px;
+}
+
+.forensic-hint {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.forensic-ela-img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.forensic-spinner {
+  width: 32px;
+  height: 32px;
+  margin: 40px auto;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.forensic-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.forensic-risk {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.forensic-risk.rendah { background: #d4edda; color: #155724; }
+.forensic-risk.sedang { background: #fff3cd; color: #856404; }
+.forensic-risk.tinggi { background: #f8d7da; color: #721c24; }
+
+.forensic-flags {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.forensic-flags li {
+  padding: 4px 0;
+  font-size: 13px;
+  line-height: 1.45;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.forensic-meta-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.forensic-meta-table td {
+  padding: 3px 6px;
+  vertical-align: top;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.forensic-meta-table td:first-child {
+  color: var(--muted);
+  white-space: nowrap;
+  width: 40%;
 }
 
 @media (max-width: 900px) {

@@ -13,7 +13,23 @@ from pathlib import Path
 import pandas as pd
 import requests
 from flask import Flask, Response, jsonify, render_template, request
-from PIL import Image
+import exiftool
+from PIL import Image, ImageChops, ImageEnhance
+
+# Resolve ExifTool executable: try PATH first, then known install location
+_EXIFTOOL_CANDIDATES = [
+    "exiftool",
+    r"C:\Users\SARM2\AppData\Local\Programs\ExifTool\ExifTool.exe",
+]
+_EXIFTOOL_EXE: str = "exiftool"
+for _candidate in _EXIFTOOL_CANDIDATES:
+    try:
+        import subprocess
+        subprocess.run([_candidate, "-ver"], capture_output=True, check=True, timeout=5)
+        _EXIFTOOL_EXE = _candidate
+        break
+    except Exception:
+        continue
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -1436,6 +1452,134 @@ def fetch_image_bytes(url: str) -> bytes:
     return output.getvalue()
 
 
+def fetch_raw_bytes(url: str) -> bytes:
+    response = requests.get(url, timeout=IMAGE_TIMEOUT_SECONDS)
+    response.raise_for_status()
+    return response.content
+
+
+def compute_ela(image_bytes: bytes, quality: int = 95, amplify: int = 15) -> bytes:
+    """Error Level Analysis: re-compress then diff. Bright areas = likely edited."""
+    original = Image.open(BytesIO(image_bytes)).convert("RGB")
+    # Cap size so processing stays fast
+    original.thumbnail((1200, 1200))
+
+    buf = BytesIO()
+    original.save(buf, "JPEG", quality=quality)
+    buf.seek(0)
+    recompressed = Image.open(buf).convert("RGB")
+
+    ela = ImageChops.difference(original, recompressed)
+    ela = ela.point(lambda x: min(x * amplify, 255))
+
+    out = BytesIO()
+    ela.save(out, "JPEG", quality=95)
+    return out.getvalue()
+
+
+def analyze_image_metadata(image_bytes: bytes) -> dict:
+    """Extract metadata via ExifTool, grouped by namespace, with forensic flags."""
+    result: dict = {"file_info": {}, "groups": {}, "flags": [], "risk": "rendah"}
+    tmp_path = APP_DIR / f"_forensic_tmp_{os.getpid()}.jpg"
+    # Namespaces to skip entirely (internal/uninteresting)
+    _skip_ns = {"ExifTool", "File"}
+    # File-info keys to surface separately
+    _file_keys = {"FileType", "FileTypeExtension", "MIMEType", "ImageWidth",
+                  "ImageHeight", "FileSize", "ColorComponents", "BitsPerSample",
+                  "EncodingProcess", "YCbCrSubSampling"}
+    try:
+        tmp_path.write_bytes(image_bytes)
+        with exiftool.ExifToolHelper(executable=_EXIFTOOL_EXE) as et:
+            raw: dict = (et.get_metadata(str(tmp_path)) or [{}])[0]
+
+        # Build flat lookup (short key → value) for flag analysis
+        flat: dict[str, str] = {}
+        # Build grouped display dict
+        groups: dict[str, dict[str, str]] = {}
+        for full_key, value in raw.items():
+            if full_key == "SourceFile":
+                continue
+            ns, _, short = full_key.partition(":")
+            if not short:          # no namespace
+                ns, short = "Other", full_key
+            try:
+                str_val = str(value)[:400]
+            except Exception:
+                str_val = ""
+            flat[short] = str_val  # last-wins for duplicates
+            if ns in _skip_ns:
+                # Pull file info out of File: namespace
+                if ns == "File" and short in _file_keys:
+                    result["file_info"][short] = str_val
+                continue
+            # Skip binary placeholders
+            if "(Binary data" in str_val:
+                continue
+            groups.setdefault(ns, {})[short] = str_val
+
+        result["groups"] = groups
+
+        # ---- Forensic flag analysis ----
+        flags: list[str] = []
+        software = flat.get("Software", "").lower()
+        creator_tool = flat.get("CreatorTool", "").lower()
+        history_sw = flat.get("HistorySoftwareAgent", "").lower()
+        all_sw = f"{software} {creator_tool} {history_sw}"
+
+        ai_tools = ["stable diffusion", "midjourney", "dall-e", "dall·e", "firefly", "imagen",
+                    "ideogram", "bing image creator", "adobe firefly", "flux", "sora", "runway"]
+        editing_tools = ["photoshop", "gimp", "lightroom", "canva", "paint.net", "pixlr",
+                         "snapseed", "vsco", "affinity", "capture one", "darktable", "rawtherapee"]
+
+        if any(t in all_sw for t in ai_tools):
+            flags.append(f"🚨 Software AI terdeteksi: {flat.get('Software') or flat.get('CreatorTool', '')}")
+        elif any(t in all_sw for t in editing_tools):
+            flags.append(f"⚠ Software editing terdeteksi: {flat.get('Software') or flat.get('CreatorTool', '')}")
+
+        dt = flat.get("ModifyDate", flat.get("DateTime", ""))
+        dto = flat.get("DateTimeOriginal", flat.get("CreateDate", ""))
+        if dt and dto and dt != dto:
+            flags.append(f"⚠ Tanggal modifikasi ({dt}) ≠ tanggal pengambilan ({dto})")
+
+        if flat.get("HistoryAction") or flat.get("History"):
+            flags.append("⚠ Riwayat edit XMP terdeteksi (kemungkinan diedit di Photoshop/Illustrator)")
+
+        profile_desc = flat.get("ProfileDescription", "").lower()
+        if profile_desc and "srgb" not in profile_desc:
+            flags.append(f"ℹ Profil warna non-standar: {flat.get('ProfileDescription', '')}")
+
+        has_camera_meta = any(flat.get(k) for k in ("Make", "Model", "DateTimeOriginal", "Software", "GPSLatitude"))
+        if not has_camera_meta:
+            flags.append("ℹ Tidak ada metadata kamera — foto dari HP/kamera biasanya memiliki EXIF (Make, Model, dll.)")
+
+        if flat.get("FileType", "").upper() == "PNG":
+            flags.append("ℹ Format PNG — umum untuk screenshot atau hasil editing/AI")
+
+        thumb_w, img_w = flat.get("ThumbnailImageWidth", ""), flat.get("ImageWidth", "")
+        if thumb_w and img_w:
+            try:
+                ratio = int(img_w) / int(thumb_w)
+                if not (1.5 <= ratio <= 20):
+                    flags.append(f"ℹ Rasio thumbnail/gambar tidak lazim ({thumb_w} vs {img_w}px)")
+            except (ValueError, ZeroDivisionError):
+                pass
+
+        result["flags"] = flags
+        result["risk"] = (
+            "tinggi" if any("🚨" in f for f in flags)
+            else "sedang" if any("⚠" in f for f in flags)
+            else "rendah"
+        )
+    except Exception as exc:
+        result["error"] = str(exc)
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return result
+
+
 def dataset_payload() -> dict[str, object]:
     return {
         "mode": DATASET_MODE,
@@ -1648,6 +1792,13 @@ def api_action() -> Response:
         kept_indices.discard(idx)
         deleted_indices.discard(idx)
         idx += 1
+    elif action == "next":
+        ann = ROW_ANNOTATIONS.get(idx, {})
+        is_reviewed = idx in kept_indices or idx in deleted_indices or idx in skipped_indices or ann.get("expected")
+        if not is_reviewed:
+            return jsonify({"error": "Baris ini belum diulas, gunakan Skip jika ingin melewati."}), 400
+        update_annotation(idx, annotation)
+        idx += 1
     elif action == "back":
         update_annotation(idx, annotation)
         idx -= 1
@@ -1786,6 +1937,38 @@ def api_migrate_all() -> Response:
     """Scan legacy .progress JSON/TXT files and import them into SQLite."""
     results = _migrate_all_progress()
     return jsonify(results)
+
+
+@app.get("/api/forensic/ela/<int:idx>")
+def api_forensic_ela(idx: int) -> Response:
+    if df.empty or idx < 0 or idx >= len(df):
+        return jsonify({"error": "Index tidak valid"}), 400
+    url = safe_value(df.iloc[idx].get(URL_COL, ""))
+    if not url:
+        return jsonify({"error": "Tidak ada URL gambar untuk baris ini"}), 400
+    try:
+        quality = min(max(int(request.args.get("quality", 95)), 50), 99)
+        amplify = min(max(int(request.args.get("amplify", 15)), 1), 50)
+        raw = fetch_raw_bytes(url)
+        ela_bytes = compute_ela(raw, quality=quality, amplify=amplify)
+        return Response(ela_bytes, mimetype="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.get("/api/forensic/meta/<int:idx>")
+def api_forensic_meta(idx: int) -> Response:
+    if df.empty or idx < 0 or idx >= len(df):
+        return jsonify({"error": "Index tidak valid"}), 400
+    url = safe_value(df.iloc[idx].get(URL_COL, ""))
+    if not url:
+        return jsonify({"error": "Tidak ada URL gambar untuk baris ini"}), 400
+    try:
+        raw = fetch_raw_bytes(url)
+        return jsonify(analyze_image_metadata(raw))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 init_db()
