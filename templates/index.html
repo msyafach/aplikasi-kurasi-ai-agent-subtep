@@ -214,28 +214,54 @@
       <section id="forensicPanel" class="forensic-panel" hidden>
         <div class="forensic-toolbar">
           <strong>Analisis Forensik</strong>
-          <label class="forensic-slider-label">
-            Kualitas re-kompresi
-            <input type="range" id="elaQuality" min="50" max="99" value="95" step="1">
-            <span id="elaQualityVal">95</span>%
-          </label>
-          <label class="forensic-slider-label">
-            Amplifikasi
-            <input type="range" id="elaAmplify" min="1" max="50" value="15" step="1">
-            <span id="elaAmplifyVal">15</span>&times;
-          </label>
-          <button type="button" id="elaRefresh" class="secondary">Refresh ELA</button>
+          <div id="elaControls" style="display:contents">
+            <label class="forensic-slider-label">
+              Kualitas re-kompresi
+              <input type="range" id="elaQuality" min="50" max="99" value="95" step="1">
+              <span id="elaQualityVal">95</span>%
+            </label>
+            <label class="forensic-slider-label">
+              Amplifikasi
+              <input type="range" id="elaAmplify" min="1" max="50" value="15" step="1">
+              <span id="elaAmplifyVal">15</span>&times;
+            </label>
+            <button type="button" id="elaRefresh" class="secondary">Refresh ELA</button>
+          </div>
+          <div id="satControls" style="display:none">
+            <label class="forensic-slider-label">
+              Amplifikasi
+              <input type="range" id="satAmplify" min="1" max="20" value="5" step="1">
+              <span id="satAmplifyVal">5</span>&times;
+            </label>
+            <button type="button" id="satRefresh" class="secondary">Refresh</button>
+          </div>
           <button type="button" id="closeForensic" class="secondary">Tutup</button>
         </div>
         <div class="forensic-body">
           <div class="forensic-ela-col">
-            <p class="forensic-hint">
-              <strong>ELA (Error Level Analysis)</strong> — area <span style="color:#e00">terang/merah</span> mengindikasikan kemungkinan editan.
-              Area gelap = kompresi konsisten (lebih alami).
-            </p>
-            <div id="elaSpinner" class="forensic-spinner" hidden></div>
-            <img id="elaImage" class="forensic-ela-img" alt="ELA" hidden>
-            <p id="elaError" class="forensic-error" hidden></p>
+            <div class="forensic-tab-bar">
+              <button type="button" class="forensic-tab active" data-tab="ela">ELA</button>
+              <button type="button" class="forensic-tab" data-tab="sat">Saturasi Warna</button>
+            </div>
+            <div id="elaView">
+              <p class="forensic-hint">
+                <strong>ELA (Error Level Analysis)</strong> — area <span style="color:#e00">terang</span> mengindikasikan inkonsistensi kompresi JPEG (kemungkinan editan).
+                Area gelap = kompresi konsisten.
+              </p>
+              <div id="elaSpinner" class="forensic-spinner" hidden></div>
+              <img id="elaImage" class="forensic-ela-img" alt="ELA" hidden>
+              <p id="elaError" class="forensic-error" hidden></p>
+            </div>
+            <div id="satView" hidden>
+              <p class="forensic-hint">
+                <strong>Saturasi Warna</strong> — menampilkan area yang memiliki warna tidak wajar pada dokumen.
+                Area <span style="color:#c80">berwarna</span> = saturasi tinggi (misalnya highlight, stiker, teks yang diedit).
+                Area gelap = warna netral/natural.
+              </p>
+              <div id="satSpinner" class="forensic-spinner" hidden></div>
+              <img id="satImage" class="forensic-ela-img" alt="Saturasi" hidden>
+              <p id="satError" class="forensic-error" hidden></p>
+            </div>
           </div>
           <div class="forensic-meta-col">
             <div id="metaSpinner" class="forensic-spinner" hidden></div>

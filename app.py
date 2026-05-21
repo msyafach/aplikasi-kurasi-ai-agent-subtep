@@ -1458,6 +1458,19 @@ def fetch_raw_bytes(url: str) -> bytes:
     return response.content
 
 
+def compute_saturation_heatmap(image_bytes: bytes, amplify: int = 5) -> bytes:
+    """Saturation anomaly map: diff between color image and its grayscale version.
+    Dark areas = no color deviation (natural). Bright/colored areas = unusual saturation."""
+    img = Image.open(BytesIO(image_bytes)).convert("RGB")
+    img.thumbnail((1200, 1200))
+    gray = img.convert("L").convert("RGB")
+    diff = ImageChops.difference(img, gray)
+    diff = diff.point(lambda x: min(x * amplify, 255))
+    out = BytesIO()
+    diff.save(out, "JPEG", quality=92)
+    return out.getvalue()
+
+
 def compute_ela(image_bytes: bytes, quality: int = 95, amplify: int = 15) -> bytes:
     """Error Level Analysis: re-compress then diff. Bright areas = likely edited."""
     original = Image.open(BytesIO(image_bytes)).convert("RGB")
@@ -1952,6 +1965,23 @@ def api_forensic_ela(idx: int) -> Response:
         raw = fetch_raw_bytes(url)
         ela_bytes = compute_ela(raw, quality=quality, amplify=amplify)
         return Response(ela_bytes, mimetype="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.get("/api/forensic/saturation/<int:idx>")
+def api_forensic_saturation(idx: int) -> Response:
+    if df.empty or idx < 0 or idx >= len(df):
+        return jsonify({"error": "Index tidak valid"}), 400
+    url = safe_value(df.iloc[idx].get(URL_COL, ""))
+    if not url:
+        return jsonify({"error": "Tidak ada URL gambar untuk baris ini"}), 400
+    try:
+        amplify = min(max(int(request.args.get("amplify", 5)), 1), 20)
+        raw = fetch_raw_bytes(url)
+        sat_bytes = compute_saturation_heatmap(raw, amplify=amplify)
+        return Response(sat_bytes, mimetype="image/jpeg",
                         headers={"Cache-Control": "no-store"})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

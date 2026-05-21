@@ -552,6 +552,31 @@ button.secondary kbd {
   max-height: 480px;
 }
 
+.forensic-tab-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.forensic-tab {
+  min-width: 0;
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.forensic-tab.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
 .forensic-hint {
   margin: 0 0 10px;
   font-size: 13px;

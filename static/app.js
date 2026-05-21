@@ -93,6 +93,16 @@ const elements = {
   elaAmplify: document.getElementById("elaAmplify"),
   elaAmplifyVal: document.getElementById("elaAmplifyVal"),
   elaRefresh: document.getElementById("elaRefresh"),
+  elaControls: document.getElementById("elaControls"),
+  elaView: document.getElementById("elaView"),
+  satImage: document.getElementById("satImage"),
+  satError: document.getElementById("satError"),
+  satSpinner: document.getElementById("satSpinner"),
+  satAmplify: document.getElementById("satAmplify"),
+  satAmplifyVal: document.getElementById("satAmplifyVal"),
+  satRefresh: document.getElementById("satRefresh"),
+  satControls: document.getElementById("satControls"),
+  satView: document.getElementById("satView"),
   closeForensic: document.getElementById("closeForensic"),
   metaContent: document.getElementById("metaContent"),
   metaSpinner: document.getElementById("metaSpinner"),
@@ -1190,10 +1200,49 @@ async function loadMeta() {
   }
 }
 
+async function loadSaturation() {
+  const amplify = elements.satAmplify.value;
+  elements.satSpinner.hidden = false;
+  elements.satImage.hidden = true;
+  elements.satError.hidden = true;
+  try {
+    const res = await fetch(`/api/forensic/saturation/${currentIndex}?amplify=${amplify}&_=${Date.now()}`);
+    if (!res.ok) {
+      const d = await res.json();
+      throw new Error(d.error || "Gagal memuat");
+    }
+    const blob = await res.blob();
+    elements.satImage.src = URL.createObjectURL(blob);
+    elements.satImage.hidden = false;
+  } catch (err) {
+    elements.satError.textContent = err.message;
+    elements.satError.hidden = false;
+  } finally {
+    elements.satSpinner.hidden = true;
+  }
+}
+
+document.querySelectorAll(".forensic-tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll(".forensic-tab").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    elements.elaView.hidden = tab !== "ela";
+    elements.satView.hidden = tab !== "sat";
+    elements.elaControls.style.display = tab === "ela" ? "contents" : "none";
+    elements.satControls.style.display = tab === "sat" ? "contents" : "none";
+  });
+});
+
+elements.satAmplify.addEventListener("input", () => {
+  elements.satAmplifyVal.textContent = elements.satAmplify.value;
+});
+elements.satRefresh.addEventListener("click", loadSaturation);
+
 async function openForensic() {
   elements.forensicPanel.hidden = false;
   forensicLoadedIdx = currentIndex;
-  await Promise.all([loadEla(), loadMeta()]);
+  await Promise.all([loadEla(), loadSaturation(), loadMeta()]);
 }
 
 elements.forensicBtn.addEventListener("click", async () => {
