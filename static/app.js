@@ -563,8 +563,8 @@ async function resumeLabeling() {
     if (payload.indices && payload.indices.length > 0) {
       targetIndex = payload.indices[0];
     } else {
-      // All items reviewed — stay at current position
-      targetIndex = currentIndex;
+      // All items reviewed — return to position before filter was applied
+      targetIndex = resumeIndex;
     }
 
     resumeIndex = targetIndex;
