@@ -389,11 +389,13 @@ function renderRow(row, { preserveResume = false } = {}) {
     elements.progress.max = Math.max(filterIndices.length - 1, 1);
     elements.progress.value = filterPos;
     elements.indexInput.value = filterPos + 1;
+    elements.indexInput.max = filterIndices.length;
     elements.indexTotal.textContent = `/ ${filterIndices.length} (filter)`;
   } else {
     elements.progress.max = Math.max(row.total - 1, 1);
     elements.progress.value = row.idx;
     elements.indexInput.value = row.row_number;
+    elements.indexInput.max = row.total;
     elements.indexTotal.textContent = `/ ${row.total}`;
   }
 
@@ -942,7 +944,7 @@ elements.clearFilter.addEventListener("click", clearFilter);
 
 elements.indexInput.addEventListener("keydown", async (e) => {
   if (e.key !== "Enter") return;
-  const total = filterIndices ? filterIndices.length : (parseInt(elements.indexTotal.textContent.replace(/\D/g, "")) || 1);
+  const total = parseInt(elements.indexInput.max) || 1;
   const val = Math.max(1, Math.min(parseInt(elements.indexInput.value) || 1, total));
   elements.indexInput.value = val;
   elements.indexInput.blur();
