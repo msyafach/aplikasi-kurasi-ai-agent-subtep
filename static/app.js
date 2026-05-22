@@ -842,17 +842,19 @@ async function sendAction(action) {
       if (shouldRemove) {
         filterIndices.splice(filterPos, 1);
         if (filterPos >= filterIndices.length) filterPos = Math.max(filterIndices.length - 1, 0);
+      } else if (action !== "save") {
+        // Status unchanged — advance to next filter item
+        const next = filterNavNext(currentIndex);
+        if (next !== null) filterPos = next;
       }
 
       if (filterIndices.length === 0) {
-        // All filter items have been re-annotated
         filterIndices = null;
         filterPos = 0;
         updateFilterUi();
         elements.message.textContent = "Semua item dalam filter sudah selesai diulas.";
         await loadRow(currentIndex, { saveProgress: false });
       } else {
-        // Stay on current item (or next if removed)
         updateFilterUi();
         await loadRow(filterIndices[filterPos], { saveProgress: false });
       }
