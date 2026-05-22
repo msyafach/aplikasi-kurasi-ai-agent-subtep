@@ -7,3 +7,5 @@ data
 uploads
 .verifikasi_progress.json
 *.db
+*.ipynb
+.ipynb_checkpoints
