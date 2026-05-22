@@ -540,7 +540,7 @@ async function applyFilter() {
   }
 }
 
-function clearFilter() {
+async function clearFilter() {
   console.log(`[clearFilter] filterIndices was ${filterIndices ? filterIndices.length + ' items' : 'null'} | resumeIndex=${resumeIndex} currentIndex=${currentIndex}`);
   filterIndices = null;
   filterPos = 0;
@@ -549,6 +549,7 @@ function clearFilter() {
   elements.filterMismatch.checked = false;
   updateFilterUi();
   elements.message.textContent = "Filter dihapus.";
+  await loadRow(currentIndex, { saveProgress: false });
 }
 
 
