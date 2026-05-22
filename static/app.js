@@ -829,8 +829,17 @@ async function sendAction(action) {
 
     // Filter-mode: navigate to next within filtered set.
     if (filterIndices && payload.row) {
-      if (action !== "save") {
-        // Annotation status changed — remove this item from the filter snapshot
+      // Determine if this item no longer matches the filter after the action
+      const actionToStatus = { approve: "approved", reject: "rejected", skip: "skip" };
+      const newStatus = actionToStatus[action];
+      const scopeFilter = elements.filterScope.value; // "approved"|"rejected"|"skip"|""
+      const mismatchFilter = elements.filterMismatch.checked;
+
+      const statusChanged = newStatus && scopeFilter && scopeFilter !== newStatus;
+      const mismatchMayResolve = newStatus && mismatchFilter;
+      const shouldRemove = statusChanged || mismatchMayResolve;
+
+      if (shouldRemove) {
         filterIndices.splice(filterPos, 1);
         if (filterPos >= filterIndices.length) filterPos = Math.max(filterIndices.length - 1, 0);
       }
@@ -842,11 +851,8 @@ async function sendAction(action) {
         updateFilterUi();
         elements.message.textContent = "Semua item dalam filter sudah selesai diulas.";
         await loadRow(currentIndex, { saveProgress: false });
-      } else if (action === "save") {
-        // Save stays on current item
-        await loadRow(filterIndices[filterPos], { saveProgress: false });
       } else {
-        // Navigate to next remaining filter item
+        // Stay on current item (or next if removed)
         updateFilterUi();
         await loadRow(filterIndices[filterPos], { saveProgress: false });
       }
