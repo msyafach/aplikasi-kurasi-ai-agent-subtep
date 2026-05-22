@@ -983,7 +983,7 @@ def export_path_for(scope: str, export_format: str) -> Path:
     else:
         base_dir = OUTPUT_ROOT / _csv_dir_id(CSV_PATH)
 
-    suffix = "json" if export_format in {"json_labelling", "raw_json", "test_reason_json"} else "csv"
+    suffix = "json" if export_format in {"json_labelling", "data_train_json_labelling", "raw_json", "test_reason_json"} else "csv"
     return base_dir / RUN_ID / f"export_{mode_name}_{safe_filename(scope)}_{safe_filename(export_format)}.{suffix}"
 
 
@@ -1006,36 +1006,17 @@ def export_records(scope: str, export_format: str) -> dict[str, object]:
         if DATASET_MODE == "finetune_json":
             write_json_output(output_path, indices)
         else:
-            output = full_labelling_skeleton()
-            flat_records = []
-
-            for idx in sorted(indices):
-                record = row_to_labelling_record(idx)
-
-                row_agent = ""
-                annotation = ROW_ANNOTATIONS.get(idx, {})
-                if annotation.get("agent_key"):
-                    row_agent = str(annotation["agent_key"]).strip()
-                elif "agent_key" in df.columns:
-                    row_agent = str(df.iloc[idx].get("agent_key", "")).strip()
-                if row_agent and (pd.isna(row_agent) or row_agent == "nan"):
-                    row_agent = ""
-                if not row_agent:
-                    row_agent = CSV_TAG_AGENT_KEY
-
-                if row_agent:
-                    row_group = infer_group_key(row_agent)
-                    if row_group:
-                        output.setdefault(row_group, {}).setdefault(row_agent, []).append(record)
-                    else:
-                        flat_records.append(record)
-                else:
-                    flat_records.append(record)
-
+            output, flat_records = export_json_labelling_csv(indices, row_to_labelling_record)
             if not any(output.values()) and flat_records:
                 output_path.write_text(json.dumps(flat_records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             else:
                 output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    elif export_format == "data_train_json_labelling":
+        output, flat_records = export_json_labelling_csv(indices, row_to_data_train_labelling_record)
+        if not any(output.values()) and flat_records:
+            output_path.write_text(json.dumps(flat_records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        else:
+            output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     elif export_format == "test_reason_json":
         records = [row_to_test_reason_record(idx) for idx in sorted(indices)]
         output_path.write_text(json.dumps(records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -1122,6 +1103,9 @@ def preview_records(scope: str, export_format: str, limit: int = 3) -> dict[str,
             row["reviewer_notes"] = annotation.get("reviewer_notes", row.get("reviewer_notes", ""))
             rows.append({k: ("" if isinstance(v, float) and pd.isna(v) else v) for k, v in row.items()})
         preview = rows
+    elif export_format == "data_train_json_labelling":
+        output, flat_records = export_json_labelling_csv(preview_indices, row_to_data_train_labelling_record)
+        preview = output if any(output.values()) else flat_records
     else:
         raise ValueError(f"Format preview tidak dikenal: {export_format}")
 
@@ -1162,6 +1146,41 @@ def row_to_labelling_record(idx: int) -> dict[str, object]:
     if annotation.get("reviewer_notes"):
         record["reviewer_notes"] = annotation["reviewer_notes"]
     return record
+
+
+def row_to_data_train_labelling_record(idx: int) -> dict[str, object]:
+    """json_labelling record for data_train CSV: uses reviewer_notes as description."""
+    row = df.iloc[idx]
+    annotation = annotation_for_idx(idx)
+    return {
+        "url": safe_value(row.get(URL_COL, "")),
+        "expected": annotation["expected"],
+        "category": split_categories(annotation["category"]),
+        "description": annotation.get("reviewer_notes", ""),
+    }
+
+
+def export_json_labelling_csv(indices: set[int], record_fn) -> tuple[dict, list]:
+    """Build {group: {agent: [records]}} from CSV rows using record_fn. Returns (output, flat_records)."""
+    output = full_labelling_skeleton()
+    flat_records: list = []
+    for idx in sorted(indices):
+        record = record_fn(idx)
+        annotation = ROW_ANNOTATIONS.get(idx, {})
+        row_agent = str(annotation.get("agent_key") or "").strip()
+        if not row_agent or row_agent == "nan":
+            row_agent = str(df.iloc[idx].get(AGENT_KEY_COL, "") if AGENT_KEY_COL else "").strip()
+        if not row_agent or row_agent == "nan":
+            row_agent = CSV_TAG_AGENT_KEY
+        if row_agent:
+            row_group = infer_group_key(row_agent)
+            if row_group:
+                output.setdefault(row_group, {}).setdefault(row_agent, []).append(record)
+            else:
+                flat_records.append(record)
+        else:
+            flat_records.append(record)
+    return output, flat_records
 
 
 def parse_reading(value: object) -> dict[str, object]:

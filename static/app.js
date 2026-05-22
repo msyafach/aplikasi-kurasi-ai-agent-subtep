@@ -230,6 +230,8 @@ function renderDataset(dataset) {
   document.querySelector(".finetune-bar").hidden = isDataTrainDataset;
   const exportOptDataTrain = document.getElementById("exportOptDataTrain");
   if (exportOptDataTrain) exportOptDataTrain.hidden = !isDataTrainDataset;
+  const exportOptDataTrainJson = document.getElementById("exportOptDataTrainJson");
+  if (exportOptDataTrainJson) exportOptDataTrainJson.hidden = !isDataTrainDataset;
 
   // "Tandai Agent" button loads records in finetune_json; csv uses dropdown change handler
   elements.loadAgent.hidden = currentDatasetMode !== "finetune_json";
