@@ -19,7 +19,8 @@ console.log(`[INIT] currentIndex=${currentIndex}, resumeIndex=${resumeIndex}`);
 
 const elements = {
   progress: document.getElementById("progress"),
-  indexLabel: document.getElementById("indexLabel"),
+  indexInput: document.getElementById("indexInput"),
+  indexTotal: document.getElementById("indexTotal"),
   currentCsv: document.getElementById("currentCsv"),
   datasetSelect: document.getElementById("datasetSelect"),
   datasetPath: document.getElementById("datasetPath"),
@@ -73,7 +74,6 @@ const elements = {
   filterNoCategory: document.getElementById("filterNoCategory"),
   filterMismatch: document.getElementById("filterMismatch"),
   applyFilter: document.getElementById("applyFilter"),
-  resumeLabeling: document.getElementById("resumeLabeling"),
   clearFilter: document.getElementById("clearFilter"),
   filterStatus: document.getElementById("filterStatus"),
   continueBtn: document.getElementById("continueBtn"),
@@ -149,8 +149,8 @@ function updateButtonStates() {
   elements.exportData.disabled = apiBusy || !agentTagged;
   elements.previewExport.disabled = apiBusy || !agentTagged;
   elements.applyFilter.disabled = apiBusy || !agentTagged;
-  elements.resumeLabeling.disabled = apiBusy;
   elements.clearFilter.disabled = apiBusy;
+  elements.indexInput.disabled = apiBusy || !datasetLoaded;
   elements.continueBtn.hidden = !stopped;
   elements.continueBtn.disabled = apiBusy || !agentTagged;
   const needsAgentPick = !agentTagged && !apiBusy && datasetLoaded;
@@ -388,11 +388,13 @@ function renderRow(row, { preserveResume = false } = {}) {
   if (filterIndices && filterIndices.length > 0) {
     elements.progress.max = Math.max(filterIndices.length - 1, 1);
     elements.progress.value = filterPos;
-    elements.indexLabel.textContent = `${filterPos + 1} / ${filterIndices.length} (filter)`;
+    elements.indexInput.value = filterPos + 1;
+    elements.indexTotal.textContent = `/ ${filterIndices.length} (filter)`;
   } else {
     elements.progress.max = Math.max(row.total - 1, 1);
     elements.progress.value = row.idx;
-    elements.indexLabel.textContent = `${row.row_number} / ${row.total}`;
+    elements.indexInput.value = row.row_number;
+    elements.indexTotal.textContent = `/ ${row.total}`;
   }
 
   currentRowStatus = row.status || "raw";
@@ -481,7 +483,6 @@ function filterNavPrev(fromIdx) {
 function updateFilterUi() {
   const active = filterIndices !== null;
   elements.clearFilter.hidden = !active;
-  elements.resumeLabeling.hidden = false;
   if (active) {
     const scopeLabel = elements.filterScope.value || "Semua";
     const noCatLabel = elements.filterNoCategory.checked ? " + Kategori kosong" : "";
@@ -498,7 +499,7 @@ async function applyFilter() {
   const noCategory = elements.filterNoCategory.checked;
   const mismatch = elements.filterMismatch.checked;
   console.log(`[applyFilter] scope="${scope}" noCategory=${noCategory} mismatch=${mismatch} | currentIndex=${currentIndex} resumeIndex=${resumeIndex}`);
-  if (!scope && !noCategory && !mismatch) { await resumeLabeling(); return; }
+  if (!scope && !noCategory && !mismatch) { clearFilter(); return; }
 
   // Snapshot the current labeling position before entering filter mode
   resumeIndex = currentIndex;
@@ -548,35 +549,6 @@ function clearFilter() {
   elements.message.textContent = "Filter dihapus.";
 }
 
-async function resumeLabeling() {
-  console.log(`[resumeLabeling] START | resumeIndex=${resumeIndex} currentIndex=${currentIndex}`);
-  clearFilter();
-  elements.message.textContent = "Mencari posisi progress...";
-
-  try {
-    // Always ask server for the first unreviewed (raw) item — the true progress position
-    const res = await fetch("/api/scope/indices?scope=raw");
-    const payload = await res.json();
-    console.log(`[resumeLabeling] raw indices count=${payload.indices?.length}, first=${payload.indices?.[0]}`);
-
-    let targetIndex;
-    if (payload.indices && payload.indices.length > 0) {
-      targetIndex = payload.indices[0];
-    } else {
-      // All items reviewed — return to position before filter was applied
-      targetIndex = resumeIndex;
-    }
-
-    resumeIndex = targetIndex;
-    console.log(`[resumeLabeling] navigating to targetIndex=${targetIndex}`);
-    elements.message.textContent = `Kembali ke progress sekarang (baris ${targetIndex + 1}).`;
-    await loadRow(targetIndex);
-    console.log(`[resumeLabeling] done. currentIndex=${currentIndex} resumeIndex=${resumeIndex}`);
-  } catch (err) {
-    elements.message.textContent = `Gagal menemukan progress: ${err.message}`;
-    console.error(`[resumeLabeling] error:`, err);
-  }
-}
 
 async function loadDatasets() {
   const response = await fetch("/api/datasets");
@@ -966,8 +938,22 @@ elements.closePreview.addEventListener("click", () => {
 elements.resetReview.addEventListener("click", () => resetReview(false));
 elements.resetAndDeleteOutputs.addEventListener("click", () => resetReview(true));
 elements.applyFilter.addEventListener("click", applyFilter);
-elements.resumeLabeling.addEventListener("click", resumeLabeling);
 elements.clearFilter.addEventListener("click", clearFilter);
+
+elements.indexInput.addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter") return;
+  const total = filterIndices ? filterIndices.length : (parseInt(elements.indexTotal.textContent.replace(/\D/g, "")) || 1);
+  const val = Math.max(1, Math.min(parseInt(elements.indexInput.value) || 1, total));
+  elements.indexInput.value = val;
+  elements.indexInput.blur();
+  if (filterIndices) {
+    filterPos = val - 1;
+    updateFilterUi();
+    await loadRow(filterIndices[filterPos], { saveProgress: false });
+  } else {
+    await loadRow(val - 1);
+  }
+});
 elements.continueBtn.addEventListener("click", () => {
   stopped = false;
   updateButtonStates();

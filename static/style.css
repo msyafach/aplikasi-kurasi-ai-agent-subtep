@@ -158,9 +158,18 @@ progress {
   height: 18px;
 }
 
-#indexLabel {
-  min-width: 92px;
+#indexInput {
+  width: 72px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
   text-align: right;
+  font-size: 14px;
+}
+
+#indexTotal {
+  white-space: nowrap;
+  font-size: 14px;
 }
 
 .content {

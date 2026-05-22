@@ -148,14 +148,14 @@
           Berbeda dari label asal
         </label>
         <button type="button" id="applyFilter" class="secondary">Terapkan Filter</button>
-        <button type="button" id="resumeLabeling" class="secondary">&#8617; Kembali ke Progress Sekarang</button>
         <button type="button" id="clearFilter" class="secondary" hidden>Keluar Filter</button>
         <span id="filterStatus" class="muted"></span>
       </section>
 
       <section class="progress-block">
         <progress id="progress" value="0" max="1"></progress>
-        <span id="indexLabel">0 / 0</span>
+        <input id="indexInput" type="number" min="1" value="1" title="Ketik nomor baris, Enter untuk navigasi">
+        <span id="indexTotal">/ 0</span>
       </section>
 
       <section class="content">
