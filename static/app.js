@@ -813,6 +813,18 @@ async function sendAction(action) {
     return;
   }
 
+  if (filterIndices && action === "next") {
+    const next = filterNavNext(currentIndex);
+    if (next !== null) {
+      filterPos = next;
+      updateFilterUi();
+      await loadRow(filterIndices[filterPos], { saveProgress: false });
+    } else {
+      elements.message.textContent = "Sudah sampai akhir item dalam filter ini.";
+    }
+    return;
+  }
+
   setBusy(true);
   elements.message.textContent = "Menyimpan...";
 
