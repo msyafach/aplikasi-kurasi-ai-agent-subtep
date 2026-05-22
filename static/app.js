@@ -828,19 +828,27 @@ async function sendAction(action) {
     }
 
     // Filter-mode: navigate to next within filtered set.
-    // For save, server returns same idx so we navigate from currentIndex.
-    // For approve/reject/skip, server increments idx so we use payload.row.idx - 1.
     if (filterIndices && payload.row) {
-      const fromIdx = action === "save" ? currentIndex : Math.max(payload.row.idx - 1, 0);
-      const next = filterNavNext(fromIdx);
-      if (next !== null) {
-        filterPos = next;
+      if (action !== "save") {
+        // Annotation status changed — remove this item from the filter snapshot
+        filterIndices.splice(filterPos, 1);
+        if (filterPos >= filterIndices.length) filterPos = Math.max(filterIndices.length - 1, 0);
+      }
+
+      if (filterIndices.length === 0) {
+        // All filter items have been re-annotated
+        filterIndices = null;
+        filterPos = 0;
         updateFilterUi();
+        elements.message.textContent = "Semua item dalam filter sudah selesai diulas.";
+        await loadRow(currentIndex, { saveProgress: false });
+      } else if (action === "save") {
+        // Save stays on current item
         await loadRow(filterIndices[filterPos], { saveProgress: false });
       } else {
-        // Reached end of filter — stay on current filter item, don't escape
+        // Navigate to next remaining filter item
+        updateFilterUi();
         await loadRow(filterIndices[filterPos], { saveProgress: false });
-        elements.message.textContent = "Sudah sampai akhir item dalam filter ini.";
       }
     } else if (payload.row) {
       renderRow(payload.row);
