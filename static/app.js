@@ -838,8 +838,8 @@ async function sendAction(action) {
         updateFilterUi();
         await loadRow(filterIndices[filterPos], { saveProgress: false });
       } else {
-        // Reached end of filter
-        if (payload.row) renderRow(payload.row);
+        // Reached end of filter — stay on current filter item, don't escape
+        await loadRow(filterIndices[filterPos], { saveProgress: false });
         elements.message.textContent = "Sudah sampai akhir item dalam filter ini.";
       }
     } else if (payload.row) {
