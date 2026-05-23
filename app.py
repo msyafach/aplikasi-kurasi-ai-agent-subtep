@@ -57,6 +57,9 @@ DEFAULT_FINETUNE_JSON_PATH = resolve_path(
 CURATION_TAXONOMY_PATH = resolve_path(
     os.getenv("CURATION_TAXONOMY_PATH", "curation_taxonomy.json")
 )
+REJECTION_CODES_PATH = resolve_path(
+    os.getenv("REJECTION_CODES_PATH", "rejection_codes.json")
+)
 
 CATEGORY_TO_REJECTION_CODE: dict[str, str] = {
     # CarPhoto
@@ -349,6 +352,28 @@ def load_finetune_source(path_value: str | Path = DEFAULT_FINETUNE_JSON_PATH) ->
 
 
 _TAXONOMY_CACHE: dict[str, dict[str, dict[str, list[str]]]] | None = None
+_REJECTION_CODE_CACHE: dict[str, dict[str, str]] | None = None  # {group_key: {code: description}}
+
+# rejection_codes.json uses "carphoto"/"ocr_stnk" keys; map to internal group keys
+_REJECTION_CODES_GROUP_MAP = {"carphoto": "foto_kendaraan", "ocr_stnk": "stnk"}
+
+
+def load_rejection_codes() -> dict[str, dict[str, str]]:
+    """Return {group_key: {code: description}} loaded from rejection_codes.json."""
+    global _REJECTION_CODE_CACHE
+    if _REJECTION_CODE_CACHE is None:
+        try:
+            raw = json.loads(REJECTION_CODES_PATH.read_text(encoding="utf-8"))
+            _REJECTION_CODE_CACHE = {
+                _REJECTION_CODES_GROUP_MAP.get(ns, ns): {
+                    entry["code"]: entry["description"]
+                    for entry in entries
+                }
+                for ns, entries in raw.items()
+            }
+        except (OSError, json.JSONDecodeError):
+            _REJECTION_CODE_CACHE = {}
+    return _REJECTION_CODE_CACHE
 
 
 def load_taxonomy() -> dict[str, dict[str, dict[str, list[str]]]]:
@@ -1148,14 +1173,32 @@ def row_to_labelling_record(idx: int) -> dict[str, object]:
     return record
 
 
+def _codes_to_category(codes_raw: object, group_key: str) -> str:
+    """Map comma/semicolon-separated rejection codes to combined description string."""
+    lookup = load_rejection_codes().get(group_key, {})
+    codes = [c.strip() for c in str(codes_raw or "").replace(";", ",").split(",") if c.strip()]
+    descs = [lookup[c] for c in codes if c in lookup]
+    return ", ".join(descs)
+
+
 def row_to_data_train_labelling_record(idx: int) -> dict[str, object]:
-    """json_labelling record for data_train CSV: uses reviewer_notes as description."""
+    """json_labelling record for data_train CSV.
+    category: mapped from mapped_rejection_code via rejection_codes.json per agent group.
+    description: reviewer_notes.
+    """
     row = df.iloc[idx]
     annotation = annotation_for_idx(idx)
+    # Resolve agent → group for rejection code lookup
+    row_agent = str(annotation.get("agent_key") or "").strip()
+    if not row_agent or row_agent == "nan":
+        row_agent = str(row.get(AGENT_KEY_COL, "") if AGENT_KEY_COL else "").strip()
+    if not row_agent or row_agent == "nan":
+        row_agent = CSV_TAG_AGENT_KEY
+    group_key = infer_group_key(row_agent) if row_agent else ""
     return {
         "url": safe_value(row.get(URL_COL, "")),
         "expected": annotation["expected"],
-        "category": split_categories(annotation["category"]),
+        "category": _codes_to_category(row.get("mapped_rejection_code", ""), group_key),
         "description": annotation.get("reviewer_notes", ""),
     }
 
