@@ -353,9 +353,20 @@ def load_finetune_source(path_value: str | Path = DEFAULT_FINETUNE_JSON_PATH) ->
 
 _TAXONOMY_CACHE: dict[str, dict[str, dict[str, list[str]]]] | None = None
 _REJECTION_CODE_CACHE: dict[str, dict[str, str]] | None = None  # {group_key: {code: description}}
+_REJECTION_CODE_RAW_CACHE: dict | None = None  # raw rejection_codes.json
 
 # rejection_codes.json uses "carphoto"/"ocr_stnk" keys; map to internal group keys
 _REJECTION_CODES_GROUP_MAP = {"carphoto": "foto_kendaraan", "ocr_stnk": "stnk"}
+
+
+def load_rejection_codes_raw() -> dict:
+    global _REJECTION_CODE_RAW_CACHE
+    if _REJECTION_CODE_RAW_CACHE is None:
+        try:
+            _REJECTION_CODE_RAW_CACHE = json.loads(REJECTION_CODES_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            _REJECTION_CODE_RAW_CACHE = {}
+    return _REJECTION_CODE_RAW_CACHE
 
 
 def load_rejection_codes() -> dict[str, dict[str, str]]:
@@ -363,7 +374,7 @@ def load_rejection_codes() -> dict[str, dict[str, str]]:
     global _REJECTION_CODE_CACHE
     if _REJECTION_CODE_CACHE is None:
         try:
-            raw = json.loads(REJECTION_CODES_PATH.read_text(encoding="utf-8"))
+            raw = load_rejection_codes_raw()
             _REJECTION_CODE_CACHE = {
                 _REJECTION_CODES_GROUP_MAP.get(ns, ns): {
                     entry["code"]: entry["description"]
@@ -1008,7 +1019,7 @@ def export_path_for(scope: str, export_format: str) -> Path:
     else:
         base_dir = OUTPUT_ROOT / _csv_dir_id(CSV_PATH)
 
-    suffix = "json" if export_format in {"json_labelling", "data_train_json_labelling", "raw_json", "test_reason_json"} else "csv"
+    suffix = "json" if export_format in {"json_labelling", "data_train_json_labelling", "raw_json", "test_reason_json", "combined"} else "csv"
     return base_dir / RUN_ID / f"export_{mode_name}_{safe_filename(scope)}_{safe_filename(export_format)}.{suffix}"
 
 
@@ -1043,8 +1054,10 @@ def export_records(scope: str, export_format: str) -> dict[str, object]:
         else:
             output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     elif export_format == "test_reason_json":
-        records = [row_to_test_reason_record(idx) for idx in sorted(indices)]
+        records = [rec for idx in sorted(indices) for rec in row_to_test_reason_records(idx)]
         output_path.write_text(json.dumps(records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    elif export_format == "combined":
+        output_path.write_text(json.dumps(export_combined(indices), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     elif export_format == "data_train_reviewed":
         output_path = output_path.with_suffix(".csv")
         rows = []
@@ -1071,7 +1084,9 @@ def preview_records(scope: str, export_format: str, limit: int = 3) -> dict[str,
     preview_indices = set(indices[: max(limit, 1)])
 
     if export_format == "test_reason_json":
-        preview: object = [row_to_test_reason_record(idx) for idx in sorted(preview_indices)]
+        preview: object = [rec for idx in sorted(preview_indices) for rec in row_to_test_reason_records(idx)]
+    elif export_format == "combined":
+        preview = export_combined(preview_indices)
     elif export_format == "json_labelling" and DATASET_MODE == "finetune_json":
         output = {
             group_key: {agent_key: [] for agent_key in agents.keys()}
@@ -1173,32 +1188,37 @@ def row_to_labelling_record(idx: int) -> dict[str, object]:
     return record
 
 
-def _codes_to_category(codes_raw: object, group_key: str) -> str:
-    """Map comma/semicolon-separated rejection codes to combined description string."""
-    lookup = load_rejection_codes().get(group_key, {})
-    codes = [c.strip() for c in str(codes_raw or "").replace(";", ",").split(",") if c.strip()]
-    descs = [lookup[c] for c in codes if c in lookup]
-    return ", ".join(descs)
+def _category_for_agent_key(agent_key: str) -> str:
+    """Return descriptions of all rejection codes whose sub_agents include this agent's sub-agent.
+
+    E.g. "carphoto.digital_forensic" → looks up carphoto entries where sub_agents contains
+    "digital_forensic" → "Foto kendaraan dari layar/cetakan, Foto kendaraan terindikasi edit"
+    """
+    if not agent_key or "." not in agent_key:
+        return ""
+    group, sub_agent = agent_key.split(".", 1)
+    raw = load_rejection_codes_raw()
+    entries = raw.get(group, [])
+    descs = [e["description"] for e in entries if sub_agent in e.get("sub_agents", [])]
+    return " atau ".join(descs)
 
 
 def row_to_data_train_labelling_record(idx: int) -> dict[str, object]:
     """json_labelling record for data_train CSV.
-    category: mapped from mapped_rejection_code via rejection_codes.json per agent group.
+    category: rejection code descriptions whose sub_agents match this row's agent sub-agent.
     description: reviewer_notes.
     """
     row = df.iloc[idx]
     annotation = annotation_for_idx(idx)
-    # Resolve agent → group for rejection code lookup
     row_agent = str(annotation.get("agent_key") or "").strip()
     if not row_agent or row_agent == "nan":
         row_agent = str(row.get(AGENT_KEY_COL, "") if AGENT_KEY_COL else "").strip()
     if not row_agent or row_agent == "nan":
         row_agent = CSV_TAG_AGENT_KEY
-    group_key = infer_group_key(row_agent) if row_agent else ""
     return {
         "url": safe_value(row.get(URL_COL, "")),
         "expected": annotation["expected"],
-        "category": _codes_to_category(row.get("mapped_rejection_code", ""), group_key),
+        "category": _category_for_agent_key(row_agent),
         "description": annotation.get("reviewer_notes", ""),
     }
 
@@ -1224,6 +1244,31 @@ def export_json_labelling_csv(indices: set[int], record_fn) -> tuple[dict, list]
         else:
             flat_records.append(record)
     return output, flat_records
+
+
+def export_combined(indices: set[int]) -> dict:
+    """Build {test_api_data: {group: {agent: [...]}}, labelling_data: {group: {agent: [...]}}}."""
+    test_api_data: dict = full_labelling_skeleton()
+    labelling_data: dict = full_labelling_skeleton()
+
+    for idx in sorted(indices):
+        annotation = ROW_ANNOTATIONS.get(idx, {})
+        row_agent = str(annotation.get("agent_key") or "").strip()
+        if not row_agent or row_agent == "nan":
+            row_agent = str(df.iloc[idx].get(AGENT_KEY_COL, "") if AGENT_KEY_COL else "").strip()
+        if not row_agent or row_agent == "nan":
+            row_agent = CSV_TAG_AGENT_KEY
+        row_group = infer_group_key(row_agent) if row_agent else ""
+
+        for rec in row_to_test_reason_records(idx):
+            if row_group and row_agent:
+                test_api_data.setdefault(row_group, {}).setdefault(row_agent, []).append(rec)
+
+        lab_rec = row_to_labelling_record(idx)
+        if row_group and row_agent:
+            labelling_data.setdefault(row_group, {}).setdefault(row_agent, []).append(lab_rec)
+
+    return {"test_api_data": test_api_data, "labelling_data": labelling_data}
 
 
 def parse_reading(value: object) -> dict[str, object]:
@@ -1307,11 +1352,26 @@ def category_to_codes(category: object) -> list[str]:
     return codes
 
 
-def row_to_test_reason_record(idx: int) -> dict[str, object]:
+def _build_test_reason_record(base: dict, code: str, category: str) -> dict[str, object]:
+    """Insert mapped_rejection_code/category into a base record dict in the correct key order."""
+    result = {}
+    for k, v in base.items():
+        result[k] = v
+        if k == "plate_color":
+            result["mapped_rejection_code"] = code
+            result["mapped_rejection_category"] = category
+    return result
+
+
+def row_to_test_reason_records(idx: int) -> list[dict[str, object]]:
+    """Return one record per rejection code (or a single record when there are none)."""
     if DATASET_MODE == "finetune_json":
         record = annotated_record(idx)
         category = safe_value(record.get("category", ""))
-        return {
+        codes = category_to_codes(category)
+        cats = split_categories(category)
+        desc = record.get("description") or None
+        base = {
             "web_registerasi_detail_id": "",
             "web_register_id": "",
             "police_number": "",
@@ -1322,14 +1382,15 @@ def row_to_test_reason_record(idx: int) -> dict[str, object]:
             "wheel_count": "",
             "cubicle_centimeter": "",
             "plate_color": "",
-            "mapped_rejection_code": category_to_codes(category),
-            "mapped_rejection_category": split_categories(category),
             "mapped_rejection_message": "",
             "expected": record.get("expected", ""),
-            "description": record.get("description", ""),
+            "description": desc,
             "is_valid_verifikasi_ulang": None,
             "status": "",
         }
+        if not codes:
+            return [_build_test_reason_record(base, "", "")]
+        return [_build_test_reason_record(base, c, cat) for c, cat in zip(codes, cats)]
 
     row = df.iloc[idx]
     stnk_reading = parse_reading(row.get("STNK Reading"))
@@ -1341,7 +1402,9 @@ def row_to_test_reason_record(idx: int) -> dict[str, object]:
         categories = split_categories(row.get("mapped_rejection_category", ""))
         derived_codes = split_categories(row.get("mapped_rejection_code", ""))
 
-    return {
+    desc = annotation.get("description") or None
+
+    base = {
         "web_registerasi_detail_id": safe_value(
             first_value(row.get("web_registerasi_detail_id"), row.get("Web Registerasi Detail ID"), row.get("id"))
         ),
@@ -1362,14 +1425,16 @@ def row_to_test_reason_record(idx: int) -> dict[str, object]:
         "wheel_count": safe_value(first_value(row.get("wheel_count"), vehicle_reading.get("wheel_count"))),
         "cubicle_centimeter": safe_value(first_value(row.get("cubicle_centimeter"), stnk_reading.get("cubicle_centimeter"))),
         "plate_color": safe_value(first_value(row.get("plate_color"), stnk_reading.get("plat_color"), vehicle_reading.get("plat_color"))),
-        "mapped_rejection_code": derived_codes,
-        "mapped_rejection_category": categories,
         "mapped_rejection_message": safe_value(row.get("mapped_rejection_message", "")),
         "expected": annotation["expected"],
-        "description": annotation["description"],
+        "description": desc,
         "is_valid_verifikasi_ulang": None if safe_value(row.get("is_valid_verifikasi_ulang", "")) == "" else row.get("is_valid_verifikasi_ulang"),
         "status": json_safe(row.get("status", row.get("Status", ""))),
     }
+
+    if not derived_codes:
+        return [_build_test_reason_record(base, "", "")]
+    return [_build_test_reason_record(base, c, cat) for c, cat in zip(derived_codes, categories)]
 
 
 def write_json_output(path: Path, indices: set[int]) -> None:

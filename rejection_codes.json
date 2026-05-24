@@ -1,0 +1,133 @@
+{
+  "carphoto": [
+    {
+      "code": "C-01",
+      "description": "Nopol tidak cocok",
+      "sub_agents": ["vehicle_analysis"]
+    },
+    {
+      "code": "C-02",
+      "description": "Nopol editan",
+      "sub_agents": []
+    },
+    {
+      "code": "C-03",
+      "description": "Plat tidak terbaca",
+      "sub_agents": ["vehicle_analysis"]
+    },
+    {
+      "code": "C-04",
+      "description": "Warna plat tidak sesuai",
+      "sub_agents": []
+    },
+    {
+      "code": "C-05",
+      "description": "Jumlah roda tidak terlihat atau tidak bisa dikalkulasi",
+      "sub_agents": ["completeness_validator"]
+    },
+    {
+      "code": "C-06",
+      "description": "Jumlah roda tidak sesuai",
+      "sub_agents": []
+    },
+    {
+      "code": "C-07",
+      "description": "Foto kendaraan dari layar/cetakan",
+      "sub_agents": ["screen_monitor", "digital_forensic"],
+      "digital_forensic_type": "PHOTO_OF_SCREEN"
+    },
+    {
+      "code": "C-08",
+      "description": "Foto nopol salah sudut",
+      "sub_agents": ["completeness_validator"]
+    },
+    {
+      "code": "C-09",
+      "description": "Foto kendaraan terindikasi edit",
+      "sub_agents": ["plate_number_edit", "digital_forensic"],
+      "digital_forensic_type": "non-PHOTO_OF_SCREEN"
+    },
+    {
+      "code": "C-10",
+      "description": "Foto kendaraan terindikasi buatan AI",
+      "sub_agents": ["ai_car_generated"]
+    },
+    {
+      "code": "C-11",
+      "description": "Foto bukan foto kendaraan",
+      "sub_agents": ["completeness_validator"]
+    },
+    {
+      "code": "C-12",
+      "description": "Kendaraan tidak berhak",
+      "sub_agents": ["vehicle_analysis"]
+    },
+    {
+      "code": "C-13",
+      "description": "Alasan penolakan foto kendaraan lainnya",
+      "sub_agents": []
+    }
+  ],
+  "ocr_stnk": [
+    {
+      "code": "K-01",
+      "description": "Dokumen STNK tidak lengkap",
+      "sub_agents": ["sheet_counter", "header_detector"]
+    },
+    {
+      "code": "K-02",
+      "description": "STNK terpotong",
+      "sub_agents": ["crop_field_detector", "clarity_validator", "header_detector"]
+    },
+    {
+      "code": "K-03",
+      "description": "STNK buram",
+      "sub_agents": ["blur_detector"]
+    },
+    {
+      "code": "K-04",
+      "description": "STNK non-asli (scan atau screenshot atau tidak berwarna)",
+      "sub_agents": ["screen_monitor_detector", "screen_monitor_detector_v2", "stnk_detector", "print_detector", "clarity_validator"]
+    },
+    {
+      "code": "K-05",
+      "description": "STNK editan",
+      "sub_agents": ["digital_forensic"]
+    },
+    {
+      "code": "K-06",
+      "description": "STNK terindikasi buatan AI",
+      "sub_agents": ["digital_forensic"]
+    },
+    {
+      "code": "K-07",
+      "description": "Nopol tidak sesuai dengan dokumen",
+      "sub_agents": ["stnk_standard_verifier", "stnk_contextual_verifier"]
+    },
+    {
+      "code": "K-08",
+      "description": "Warna plat tidak sesuai dengan dokumen",
+      "sub_agents": ["pajak_standard_verifier"]
+    },
+    {
+      "code": "K-09",
+      "description": "No rangka tidak sesuai dengan dokumen",
+      "sub_agents": ["stnk_standard_verifier", "stnk_contextual_verifier"]
+    },
+    {
+      "code": "K-10",
+      "description": "CC tidak sesuai dengan dokumen",
+      "sub_agents": ["pajak_standard_verifier", "pajak_contextual_verifier"]
+    },
+    {
+      "code": "K-11",
+      "description": "Jenis BBM tidak sesuai dengan dokumen",
+      "sub_agents": ["pajak_standard_verifier", "pajak_contextual_verifier"]
+    },
+    {
+      "code": "K-12",
+      "description": "Alasan penolakan foto stnk lainnya",
+      "sub_agents": []
+    }
+  ]
+}
