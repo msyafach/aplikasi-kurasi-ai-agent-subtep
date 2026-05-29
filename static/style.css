@@ -213,6 +213,11 @@ progress {
 .bq-panel .reading-grid {
   grid-template-columns: 1fr;
   gap: 2px 0;
+  max-height: none;
+  overflow: visible;
+  background: transparent;
+  border: none;
+  padding: 0;
 }
 
 .bq-panel .reading-key {
