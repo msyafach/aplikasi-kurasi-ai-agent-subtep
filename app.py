@@ -65,12 +65,14 @@ CATEGORY_TO_REJECTION_CODE: dict[str, str] = {
     # CarPhoto
     "Nopol tidak cocok": "C-01",
     "Nopol editan": "C-02",
+    "Plat tidak terbaca": "C-03",
+    "Warna plat tidak sesuai": "C-04",
+    "Jumlah roda tidak terlihat atau tidak bisa dikalkulasi": "C-05",
+    "Jumlah roda tidak sesuai": "C-06",
     "Foto kendaraan dari layar/cetakan": "C-07",
+    "Foto nopol salah sudut": "C-08",
     "Foto kendaraan terindikasi edit": "C-09",
     "Foto kendaraan terindikasi buatan AI": "C-10",
-    "Foto nopol salah sudut": "C-08",
-    "Jumlah roda tidak sesuai": "C-06",
-    "Jumlah roda tidak terlihat atau tidak bisa dikalkulasi": "C-05",
     "Foto bukan foto kendaraan": "C-11",
     "Kendaraan tidak berhak": "C-12",
     "Alasan penolakan foto kendaraan lainnya": "C-13",
@@ -90,6 +92,20 @@ CATEGORY_TO_REJECTION_CODE: dict[str, str] = {
 }
 
 CURATED_CATEGORIES: list[str] = list(CATEGORY_TO_REJECTION_CODE.keys())
+
+
+def curated_category_meta() -> list[dict[str, str]]:
+    """Each curated category with its rejection code and display group, for the UI picker."""
+    meta = []
+    for name, code in CATEGORY_TO_REJECTION_CODE.items():
+        if code.startswith("C-"):
+            group = "Kendaraan"
+        elif code.startswith("K-"):
+            group = "STNK"
+        else:
+            group = "Lainnya"
+        meta.append({"name": name, "code": code, "group": group})
+    return meta
 
 IMAGE_TIMEOUT_SECONDS = float(os.getenv("IMAGE_TIMEOUT_SECONDS", "8"))
 MAX_IMAGE_SIZE = tuple(int(x) for x in os.getenv("MAX_IMAGE_SIZE", "900,700").split(",", 1))
@@ -1792,6 +1808,7 @@ def dataset_payload() -> dict[str, object]:
         "start_index": start_index,
         "agent_keys": sorted(df[AGENT_KEY_COL].dropna().astype(str).str.strip().unique().tolist()) if (AGENT_KEY_COL and AGENT_KEY_COL in df.columns) else (sorted(df["agent_key"].dropna().astype(str).str.strip().unique().tolist()) if "agent_key" in df.columns else []),
         "curated_categories": CURATED_CATEGORIES,
+        "curated_category_meta": curated_category_meta(),
         "outputs": {
             "approved": path_label(OUTPUT_KEEP),
             "rejected": path_label(OUTPUT_DELETED),

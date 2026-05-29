@@ -49,6 +49,7 @@ const elements = {
   categoryInput: document.getElementById("categoryInput"),
   categoryList: document.getElementById("categoryList"),
   categoryChips: document.getElementById("categoryChips"),
+  categoryPicker: document.getElementById("categoryPicker"),
   descriptionTitle: document.getElementById("descriptionTitle"),
   descriptionEditor: document.getElementById("descriptionEditor"),
   descriptionSelect: document.getElementById("descriptionSelect"),
@@ -316,6 +317,8 @@ function splitCategories(value) {
     .filter((part) => part.length > 0);
 }
 
+let categoryMeta = [];
+
 function renderCategoryChips() {
   if (!elements.categoryChips) return;
   elements.categoryChips.replaceChildren();
@@ -337,6 +340,7 @@ function renderCategoryChips() {
     chip.appendChild(remove);
     elements.categoryChips.appendChild(chip);
   });
+  updateCategoryPillStates();
 }
 
 function addCategory(value) {
@@ -346,6 +350,67 @@ function addCategory(value) {
     selectedCategories.push(name);
     renderCategoryChips();
   }
+}
+
+function toggleCategory(name) {
+  const idx = selectedCategories.indexOf(name);
+  if (idx >= 0) {
+    selectedCategories.splice(idx, 1);
+  } else {
+    selectedCategories.push(name);
+  }
+  renderCategoryChips();
+}
+
+// Build the clickable category picker, grouped (Kendaraan / STNK), each pill showing its code.
+function renderCategoryPicker() {
+  if (!elements.categoryPicker) return;
+  elements.categoryPicker.replaceChildren();
+  if (!categoryMeta.length) return;
+
+  const groups = [];
+  const byGroup = new Map();
+  for (const item of categoryMeta) {
+    if (!byGroup.has(item.group)) {
+      byGroup.set(item.group, []);
+      groups.push(item.group);
+    }
+    byGroup.get(item.group).push(item);
+  }
+
+  for (const group of groups) {
+    const label = document.createElement("div");
+    label.className = "cat-group-label";
+    label.textContent = group;
+    elements.categoryPicker.appendChild(label);
+
+    const pills = document.createElement("div");
+    pills.className = "cat-group-pills";
+    for (const item of byGroup.get(group)) {
+      const pill = document.createElement("button");
+      pill.type = "button";
+      pill.className = "category-pill";
+      pill.dataset.category = item.name;
+      const code = document.createElement("span");
+      code.className = "pill-code";
+      code.textContent = item.code;
+      const text = document.createElement("span");
+      text.textContent = item.name;
+      pill.appendChild(code);
+      pill.appendChild(text);
+      pill.addEventListener("click", () => toggleCategory(item.name));
+      pills.appendChild(pill);
+    }
+    elements.categoryPicker.appendChild(pills);
+  }
+  updateCategoryPillStates();
+}
+
+function updateCategoryPillStates() {
+  if (!elements.categoryPicker) return;
+  elements.categoryPicker.querySelectorAll(".category-pill").forEach((pill) => {
+    pill.classList.toggle("selected", selectedCategories.includes(pill.dataset.category));
+  });
 }
 
 function renderAnnotation(row) {
@@ -366,6 +431,8 @@ function renderAnnotation(row) {
     opt.value = cat;
     elements.categoryList.appendChild(opt);
   });
+  categoryMeta = (row.dataset && row.dataset.curated_category_meta) || [];
+  renderCategoryPicker();
   selectedCategories = splitCategories(annotation.category);
   renderCategoryChips();
   elements.categoryInput.value = "";
