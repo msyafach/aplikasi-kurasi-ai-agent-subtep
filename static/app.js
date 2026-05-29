@@ -7,7 +7,10 @@ let agentTagged = false;
 let datasetLoaded = false;
 let apiBusy = false;
 let imageLoading = false;
-const prefetcher = new Image();
+// Warm the browser cache for upcoming images so navigation feels instant on slow links.
+const PREFETCH_AHEAD = 4;
+const PREFETCH_CACHE_MAX = 24;
+const prefetchCache = new Map(); // url -> Image (kept referenced so the browser caches it)
 let filterIndices = null;
 let filterPos = 0;
 let resumeIndex = window.APP_CONFIG.startIndex || 0;
@@ -612,7 +615,7 @@ function renderRow(row, { preserveResume = false } = {}) {
     imageLoading = true;
     updateButtonStates();
     elements.image.src = row.url;
-    prefetchNext(row.idx + 1);
+    prefetchWindow(row.idx, row.total);
   } else {
     elements.image.hidden = true;
     elements.image.removeAttribute("src");
@@ -1032,13 +1035,43 @@ async function sendAction(action) {
   }
 }
 
-async function prefetchNext(idx) {
-  try {
-    const res = await fetch(`/api/peek/${idx}`);
-    if (!res.ok) return;
-    const { url } = await res.json();
-    if (url) prefetcher.src = url;
-  } catch (_) {}
+// The next indices to warm: follows filter order when filtering, else sequential.
+function upcomingIndices(currentIdx, total, n) {
+  if (filterIndices) {
+    return filterIndices.slice(filterPos + 1, filterPos + 1 + n);
+  }
+  const out = [];
+  for (let i = 1; i <= n; i++) {
+    const idx = currentIdx + i;
+    if (idx < total) out.push(idx);
+  }
+  return out;
+}
+
+function trimPrefetchCache() {
+  while (prefetchCache.size > PREFETCH_CACHE_MAX) {
+    const oldest = prefetchCache.keys().next().value;
+    prefetchCache.delete(oldest);
+  }
+}
+
+async function prefetchWindow(currentIdx, total) {
+  const targets = upcomingIndices(currentIdx, total, PREFETCH_AHEAD);
+  await Promise.all(
+    targets.map(async (idx) => {
+      try {
+        const res = await fetch(`/api/peek/${idx}`);
+        if (!res.ok) return;
+        const { url } = await res.json();
+        if (url && !prefetchCache.has(url)) {
+          const img = new Image();
+          img.src = url;
+          prefetchCache.set(url, img);
+        }
+      } catch (_) {}
+    })
+  );
+  trimPrefetchCache();
 }
 
 elements.image.addEventListener("load", () => {
