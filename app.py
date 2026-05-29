@@ -16,6 +16,11 @@ from flask import Flask, Response, jsonify, render_template, request
 import exiftool
 from PIL import Image, ImageChops, ImageEnhance, ImageFilter
 
+try:
+    from google.cloud import bigquery as _bigquery
+except Exception:  # library not installed / import error — feature degrades gracefully
+    _bigquery = None
+
 # Resolve ExifTool executable: try PATH first, then known install location
 _EXIFTOOL_CANDIDATES = [
     "exiftool",
@@ -124,6 +129,77 @@ def curated_category_meta() -> list[dict[str, str]]:
 
 IMAGE_TIMEOUT_SECONDS = float(os.getenv("IMAGE_TIMEOUT_SECONDS", "8"))
 MAX_IMAGE_SIZE = tuple(int(x) for x in os.getenv("MAX_IMAGE_SIZE", "900,700").split(",", 1))
+
+# ── BigQuery registration lookup (see populate.py) ───────────────────────────
+BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID", "data-governance-ppn")
+BQ_DATASET = os.getenv("BQ_DATASET", "subsiditepat_silver")
+BQ_TABLE = os.getenv("BQ_TABLE", "JBTDatabase_web_registerasi_detail")
+BQ_NOPOL_COLUMN = os.getenv("BQ_NOPOL_COLUMN", "nopol")
+# BigQuery column -> compact display label shown in the info panel.
+BQ_COLUMN_MAP: dict[str, str] = {
+    "web_register_id": "Web Register ID",
+    "no_rangka": "No. Rangka",
+    "produk_bbm": "Produk BBM",
+    "jumlah_roda": "Jumlah Roda",
+    "isi_silinder": "Isi Silinder (CC)",
+    "warna_plat": "Warna Plat",
+    "status": "Status",
+}
+
+_BQ_CLIENT = None
+_BQ_CLIENT_TRIED = False
+BQ_CACHE: dict[str, dict[str, str]] = {}  # nopol -> {label: value}
+
+
+def _bq_client():
+    """Build the BigQuery client once, lazily. Returns None if unavailable."""
+    global _BQ_CLIENT, _BQ_CLIENT_TRIED
+    if _BQ_CLIENT_TRIED:
+        return _BQ_CLIENT
+    _BQ_CLIENT_TRIED = True
+    if _bigquery is None:
+        return None
+    try:
+        _BQ_CLIENT = _bigquery.Client(project=BQ_PROJECT_ID)
+    except Exception:
+        _BQ_CLIENT = None
+    return _BQ_CLIENT
+
+
+def fetch_bq_for_nopol(nopol: str) -> dict[str, str]:
+    """Fetch registration fields for one nopol, cached per nopol. {} on any failure."""
+    nopol = (nopol or "").strip()
+    if not nopol:
+        return {}
+    if nopol in BQ_CACHE:
+        return BQ_CACHE[nopol]
+
+    client = _bq_client()
+    if client is None:
+        return {}
+
+    columns = ", ".join(BQ_COLUMN_MAP.keys())
+    query = (
+        f"SELECT {columns} FROM `{BQ_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}` "
+        f"WHERE {BQ_NOPOL_COLUMN} = @nopol LIMIT 1"
+    )
+    job_config = _bigquery.QueryJobConfig(
+        query_parameters=[_bigquery.ScalarQueryParameter("nopol", "STRING", nopol)]
+    )
+    try:
+        rows = list(client.query(query, job_config=job_config).result())
+    except Exception:
+        BQ_CACHE[nopol] = {}
+        return {}
+
+    data: dict[str, str] = {}
+    if rows:
+        row = dict(rows[0])
+        for col, label in BQ_COLUMN_MAP.items():
+            value = row.get(col)
+            data[label] = "" if value is None else str(value)
+    BQ_CACHE[nopol] = data
+    return data
 
 
 app = Flask(__name__)
@@ -2115,6 +2191,20 @@ def api_peek(idx: int) -> Response:
     if df.empty or idx < 0 or idx >= len(df):
         return jsonify({"url": ""})
     return jsonify({"url": safe_value(df.iloc[idx].get(URL_COL, ""))})
+
+
+@app.get("/api/bq/<int:idx>")
+def api_bq(idx: int) -> Response:
+    """Registration fields from BigQuery for the row's nopol (cached per nopol)."""
+    if df.empty or idx < 0 or idx >= len(df):
+        return jsonify({"nopol": "", "fields": {}, "available": _bigquery is not None})
+    row = df.iloc[idx]
+    nopol = str(first_value(row.get("police_number"), row.get("Nopol")) or "").strip()
+    return jsonify({
+        "nopol": nopol,
+        "fields": fetch_bq_for_nopol(nopol),
+        "available": _bigquery is not None,
+    })
 
 
 @app.get("/image/<int:idx>")

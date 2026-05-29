@@ -69,6 +69,8 @@ const elements = {
   groundTruth: document.getElementById("groundTruth"),
   reason: document.getElementById("reason"),
   sourceUrl: document.getElementById("sourceUrl"),
+  bqPanel: document.getElementById("bqPanel"),
+  bqData: document.getElementById("bqData"),
   stnkReading: document.getElementById("stnkReading"),
   vehicleReading: document.getElementById("vehicleReading"),
   countKeep: document.getElementById("countKeep"),
@@ -487,6 +489,11 @@ function renderAnnotation(row) {
 
   fillSelect(elements.descriptionSelect, row.description_options || (row.dataset.finetune && row.dataset.finetune.descriptions) || [], annotation.description || "", true);
   elements.descriptionText.value = annotation.description || "";
+  // eval_results: description is reference-only (its edits aren't exported); lock it to
+  // avoid accidental edits, and hide the option dropdown which doesn't apply here.
+  const lockDescription = currentFormatPreset === "eval_results";
+  elements.descriptionText.readOnly = lockDescription;
+  elements.descriptionSelect.hidden = lockDescription;
   elements.expectedSelect.value = annotation.expected || "REJECTED";
   // eval_results: pre-fill reviewer notes with the original description so a correct
   // description needs no retyping. Only when no reviewer note has been saved yet.
@@ -534,6 +541,66 @@ function renderReading(container, reading) {
   });
 }
 
+// BigQuery registration lookup: lazy, debounced, eval_results only.
+let bqRequestSeq = 0;
+let bqDebounceTimer = null;
+
+function loadBqData(idx) {
+  if (currentFormatPreset !== "eval_results") {
+    elements.bqPanel.hidden = true;
+    return;
+  }
+  clearTimeout(bqDebounceTimer);
+  const seq = ++bqRequestSeq;
+  elements.bqPanel.hidden = false;
+  elements.bqData.replaceChildren();
+  const loading = document.createElement("div");
+  loading.className = "reading-empty";
+  loading.textContent = "Memuat...";
+  elements.bqData.appendChild(loading);
+
+  // Debounce so fast Back/Next navigation doesn't fire a query per skipped row.
+  bqDebounceTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/bq/${idx}`);
+      if (seq !== bqRequestSeq) return; // a newer row was loaded; drop this result
+      const payload = await res.json();
+      const fields = (payload && payload.fields) || {};
+      const entries = Object.entries(fields).filter(([, v]) => v !== "" && v != null);
+      if (!payload.available) {
+        renderReadingLike(elements.bqData, [["info", "BigQuery tidak tersedia"]]);
+      } else if (entries.length === 0) {
+        renderReadingLike(elements.bqData, []);
+      } else {
+        renderReadingLike(elements.bqData, entries);
+      }
+    } catch (_) {
+      if (seq === bqRequestSeq) renderReadingLike(elements.bqData, []);
+    }
+  }, 250);
+}
+
+function renderReadingLike(container, entries) {
+  container.replaceChildren();
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "reading-empty";
+    empty.textContent = "-";
+    container.appendChild(empty);
+    return;
+  }
+  for (const [key, value] of entries) {
+    const k = document.createElement("span");
+    k.className = "reading-key";
+    k.textContent = key;
+    const v = document.createElement("span");
+    v.className = "reading-value";
+    v.textContent = value === null || value === undefined ? "" : String(value);
+    container.appendChild(k);
+    container.appendChild(v);
+  }
+}
+
 function renderRow(row, { preserveResume = false } = {}) {
   currentIndex = row.idx;
   const prevResume = resumeIndex;
@@ -574,6 +641,7 @@ function renderRow(row, { preserveResume = false } = {}) {
   elements.reason.textContent = row.reason || "-";
   renderReading(elements.stnkReading, row.readings ? row.readings.stnk : {});
   renderReading(elements.vehicleReading, row.readings ? row.readings.vehicle : {});
+  loadBqData(row.idx);
 
   const extraDataContainer = document.getElementById("extraDataContainer");
   if (row.extra_data && Object.keys(row.extra_data).length > 0 && row.dataset.label_col !== "Status") {
