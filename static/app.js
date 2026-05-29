@@ -243,6 +243,15 @@ function renderDataset(dataset) {
   if (exportOptDataTrainJson) exportOptDataTrainJson.hidden = !isDataTrainDataset;
   const exportOptEvalResults = document.getElementById("exportOptEvalResults");
   if (exportOptEvalResults) exportOptEvalResults.hidden = currentFormatPreset !== "eval_results";
+  const exportScopeNoMatch = document.getElementById("exportScopeNoMatch");
+  if (exportScopeNoMatch) {
+    const isEval = currentFormatPreset === "eval_results";
+    exportScopeNoMatch.hidden = !isEval;
+    // If the eval-only scope was selected but we switched away, reset to a safe default.
+    if (!isEval && elements.exportScope.value === "labeled_nomatch") {
+      elements.exportScope.value = "labeled";
+    }
+  }
 
   // "Tandai Agent" button loads records in finetune_json; csv uses dropdown change handler
   elements.loadAgent.hidden = currentDatasetMode !== "finetune_json";
@@ -364,7 +373,10 @@ function renderAnnotation(row) {
   fillSelect(elements.descriptionSelect, row.description_options || (row.dataset.finetune && row.dataset.finetune.descriptions) || [], annotation.description || "", true);
   elements.descriptionText.value = annotation.description || "";
   elements.expectedSelect.value = annotation.expected || "REJECTED";
-  elements.reviewerNotesText.value = annotation.reviewer_notes || "";
+  // eval_results: pre-fill reviewer notes with the original description so a correct
+  // description needs no retyping. Only when no reviewer note has been saved yet.
+  const notesFallback = currentFormatPreset === "eval_results" ? (annotation.description || "") : "";
+  elements.reviewerNotesText.value = annotation.reviewer_notes || notesFallback;
   currentRowAgentKey = annotation.agent_key || "";
 }
 

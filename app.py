@@ -992,6 +992,16 @@ def indices_for_scope(scope: str) -> set[int]:
         return set(skipped_indices)
     if scope == "labeled":
         return kept_indices | deleted_indices
+    if scope == "labeled_nomatch":
+        # eval_results only: reviewed (approved/rejected) rows whose model verdict
+        # did not match expected (is_match == False).
+        labeled = kept_indices | deleted_indices
+        if "is_match" not in df.columns:
+            return set(labeled)
+        return {
+            idx for idx in labeled
+            if str(df.iloc[idx].get("is_match", "")).strip().lower() == "false"
+        }
     if scope == "raw":
         return raw_indices
     if scope == "reviewed":
