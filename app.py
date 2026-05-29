@@ -94,6 +94,21 @@ CATEGORY_TO_REJECTION_CODE: dict[str, str] = {
 CURATED_CATEGORIES: list[str] = list(CATEGORY_TO_REJECTION_CODE.keys())
 
 
+def dominant_category_group() -> str:
+    """Guess the relevant category group ("Kendaraan"/"STNK") from the data's
+    mapped_rejection_code column, so the UI can collapse the irrelevant group."""
+    if df.empty or "mapped_rejection_code" not in df.columns:
+        return ""
+    codes = df["mapped_rejection_code"].dropna().astype(str).str.strip()
+    car = int(codes.str.startswith("C-").sum())
+    stnk = int(codes.str.startswith("K-").sum())
+    if stnk > car and stnk > 0:
+        return "STNK"
+    if car > stnk and car > 0:
+        return "Kendaraan"
+    return ""
+
+
 def curated_category_meta() -> list[dict[str, str]]:
     """Each curated category with its rejection code and display group, for the UI picker."""
     meta = []
@@ -1809,6 +1824,7 @@ def dataset_payload() -> dict[str, object]:
         "agent_keys": sorted(df[AGENT_KEY_COL].dropna().astype(str).str.strip().unique().tolist()) if (AGENT_KEY_COL and AGENT_KEY_COL in df.columns) else (sorted(df["agent_key"].dropna().astype(str).str.strip().unique().tolist()) if "agent_key" in df.columns else []),
         "curated_categories": CURATED_CATEGORIES,
         "curated_category_meta": curated_category_meta(),
+        "category_group_hint": dominant_category_group(),
         "outputs": {
             "approved": path_label(OUTPUT_KEEP),
             "rejected": path_label(OUTPUT_DELETED),

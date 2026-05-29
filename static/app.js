@@ -46,8 +46,7 @@ const elements = {
   closePreview: document.getElementById("closePreview"),
   categoryTitle: document.getElementById("categoryTitle"),
   categoryEditor: document.getElementById("categoryEditor"),
-  categoryInput: document.getElementById("categoryInput"),
-  categoryList: document.getElementById("categoryList"),
+  categorySelect: document.getElementById("categorySelect"),
   categoryChips: document.getElementById("categoryChips"),
   categoryPicker: document.getElementById("categoryPicker"),
   descriptionTitle: document.getElementById("descriptionTitle"),
@@ -146,7 +145,7 @@ function updateButtonStates() {
   const fieldsDisabled = apiBusy || imageLoading;
   elements.expectedSelect.disabled = fieldsDisabled;
   elements.reviewerNotesText.disabled = fieldsDisabled;
-  elements.categoryInput.disabled = fieldsDisabled;
+  elements.categorySelect.disabled = fieldsDisabled;
   elements.descriptionSelect.disabled = fieldsDisabled;
   elements.descriptionText.disabled = fieldsDisabled;
   elements.nextBtn.disabled = actionsDisabled || currentRowStatus === "raw";
@@ -318,6 +317,34 @@ function splitCategories(value) {
 }
 
 let categoryMeta = [];
+let categoryGroupHint = "";
+
+// How many quick-pick pills to show, and where usage counts are persisted.
+const FREQUENT_PILL_LIMIT = 12;
+const CATEGORY_USAGE_KEY = "kurasi_category_usage";
+let categoryUsage = loadCategoryUsage();
+
+function loadCategoryUsage() {
+  try {
+    const raw = localStorage.getItem(CATEGORY_USAGE_KEY);
+    const obj = raw ? JSON.parse(raw) : {};
+    return obj && typeof obj === "object" ? obj : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function bumpCategoryUsage(name) {
+  categoryUsage[name] = (categoryUsage[name] || 0) + 1;
+  try {
+    localStorage.setItem(CATEGORY_USAGE_KEY, JSON.stringify(categoryUsage));
+  } catch (_) {}
+}
+
+function codeForCategory(name) {
+  const item = categoryMeta.find((m) => m.name === name);
+  return item ? item.code : "";
+}
 
 function renderCategoryChips() {
   if (!elements.categoryChips) return;
@@ -343,29 +370,71 @@ function renderCategoryChips() {
   updateCategoryPillStates();
 }
 
+// Add a category to the current row and count it as "used" (drives the frequent pills).
 function addCategory(value) {
   const name = String(value || "").trim();
   if (!name) return;
   if (!selectedCategories.includes(name)) {
     selectedCategories.push(name);
-    renderCategoryChips();
+    bumpCategoryUsage(name);
+    renderFrequentPills();
   }
+  renderCategoryChips();
 }
 
 function toggleCategory(name) {
   const idx = selectedCategories.indexOf(name);
   if (idx >= 0) {
     selectedCategories.splice(idx, 1);
+    renderCategoryChips();
   } else {
-    selectedCategories.push(name);
+    addCategory(name);
   }
-  renderCategoryChips();
 }
 
-// Build the clickable category picker, grouped (Kendaraan / STNK), each pill showing its code.
-function renderCategoryPicker() {
+// Frequent pills: starts empty, fills with the categories this user picks most often.
+function renderFrequentPills() {
   if (!elements.categoryPicker) return;
   elements.categoryPicker.replaceChildren();
+
+  const frequent = Object.keys(categoryUsage)
+    .filter((name) => categoryUsage[name] > 0)
+    .sort((a, b) => categoryUsage[b] - categoryUsage[a])
+    .slice(0, FREQUENT_PILL_LIMIT);
+
+  for (const name of frequent) {
+    const pill = document.createElement("button");
+    pill.type = "button";
+    pill.className = "category-pill";
+    pill.dataset.category = name;
+    const code = document.createElement("span");
+    code.className = "pill-code";
+    code.textContent = codeForCategory(name);
+    const text = document.createElement("span");
+    text.textContent = name;
+    pill.appendChild(code);
+    pill.appendChild(text);
+    pill.addEventListener("click", () => toggleCategory(name));
+    elements.categoryPicker.appendChild(pill);
+  }
+  updateCategoryPillStates();
+}
+
+function updateCategoryPillStates() {
+  if (!elements.categoryPicker) return;
+  elements.categoryPicker.querySelectorAll(".category-pill").forEach((pill) => {
+    pill.classList.toggle("selected", selectedCategories.includes(pill.dataset.category));
+  });
+}
+
+// Full category dropdown, grouped (relevant group first when the data hints one).
+function renderCategorySelect() {
+  if (!elements.categorySelect) return;
+  elements.categorySelect.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "+ pilih kategori...";
+  elements.categorySelect.appendChild(placeholder);
   if (!categoryMeta.length) return;
 
   const groups = [];
@@ -377,40 +446,21 @@ function renderCategoryPicker() {
     }
     byGroup.get(item.group).push(item);
   }
+  if (groups.includes(categoryGroupHint)) {
+    groups.sort((a, b) => (a === categoryGroupHint ? -1 : b === categoryGroupHint ? 1 : 0));
+  }
 
   for (const group of groups) {
-    const label = document.createElement("div");
-    label.className = "cat-group-label";
-    label.textContent = group;
-    elements.categoryPicker.appendChild(label);
-
-    const pills = document.createElement("div");
-    pills.className = "cat-group-pills";
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = group;
     for (const item of byGroup.get(group)) {
-      const pill = document.createElement("button");
-      pill.type = "button";
-      pill.className = "category-pill";
-      pill.dataset.category = item.name;
-      const code = document.createElement("span");
-      code.className = "pill-code";
-      code.textContent = item.code;
-      const text = document.createElement("span");
-      text.textContent = item.name;
-      pill.appendChild(code);
-      pill.appendChild(text);
-      pill.addEventListener("click", () => toggleCategory(item.name));
-      pills.appendChild(pill);
+      const opt = document.createElement("option");
+      opt.value = item.name;
+      opt.textContent = `${item.code} · ${item.name}`;
+      optgroup.appendChild(opt);
     }
-    elements.categoryPicker.appendChild(pills);
+    elements.categorySelect.appendChild(optgroup);
   }
-  updateCategoryPillStates();
-}
-
-function updateCategoryPillStates() {
-  if (!elements.categoryPicker) return;
-  elements.categoryPicker.querySelectorAll(".category-pill").forEach((pill) => {
-    pill.classList.toggle("selected", selectedCategories.includes(pill.dataset.category));
-  });
 }
 
 function renderAnnotation(row) {
@@ -423,19 +473,14 @@ function renderAnnotation(row) {
   if (!showEditors) return;
 
   const annotation = row.annotation || {};
-  const categories = (row.dataset && row.dataset.curated_categories) || [];
 
-  elements.categoryList.replaceChildren();
-  categories.forEach((cat) => {
-    const opt = document.createElement("option");
-    opt.value = cat;
-    elements.categoryList.appendChild(opt);
-  });
   categoryMeta = (row.dataset && row.dataset.curated_category_meta) || [];
-  renderCategoryPicker();
+  categoryGroupHint = (row.dataset && row.dataset.category_group_hint) || "";
+  renderCategorySelect();
+  renderFrequentPills();
   selectedCategories = splitCategories(annotation.category);
   renderCategoryChips();
-  elements.categoryInput.value = "";
+  elements.categorySelect.value = "";
 
   fillSelect(elements.descriptionSelect, row.description_options || (row.dataset.finetune && row.dataset.finetune.descriptions) || [], annotation.description || "", true);
   elements.descriptionText.value = annotation.description || "";
@@ -1024,19 +1069,10 @@ elements.datasetSelect.addEventListener("change", () => {
   switchDataset();
 });
 
-elements.categoryInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    addCategory(elements.categoryInput.value);
-    elements.categoryInput.value = "";
-  }
-});
-elements.categoryInput.addEventListener("input", () => {
-  const options = Array.from(elements.categoryList.options).map((opt) => opt.value);
-  if (options.includes(elements.categoryInput.value)) {
-    addCategory(elements.categoryInput.value);
-    elements.categoryInput.value = "";
-  }
+elements.categorySelect.addEventListener("change", () => {
+  const value = elements.categorySelect.value;
+  if (value) addCategory(value);
+  elements.categorySelect.value = "";
 });
 
 elements.loadDataset.addEventListener("click", switchDataset);
