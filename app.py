@@ -279,6 +279,12 @@ FORMAT_PRESETS: list[dict[str, object]] = [
         "label_col": "reviewer_label",
     },
     {
+        "id": "eval_results",
+        "label": "Eval Results (image_url / expected)",
+        "url_col": "image_url",
+        "label_col": "expected",
+    },
+    {
         "id": "custom",
         "label": "Custom (pilih manual)",
         "url_col": "",
@@ -1068,6 +1074,17 @@ def export_records(scope: str, export_format: str) -> dict[str, object]:
             row["reviewer_notes"] = annotation.get("reviewer_notes", row.get("reviewer_notes", ""))
             rows.append(row)
         pd.DataFrame(rows).to_csv(output_path, index=False)
+    elif export_format == "eval_results_reviewed":
+        output_path = output_path.with_suffix(".csv")
+        rows = []
+        for idx in sorted(indices):
+            row = df.iloc[idx].to_dict()
+            annotation = annotation_for_idx(idx)
+            status = row_status(idx)
+            row["reviewer_label"] = annotation["expected"] if status != "raw" else ""
+            row["reviewer_notes"] = annotation.get("reviewer_notes", row.get("reviewer_notes", ""))
+            rows.append(row)
+        pd.DataFrame(rows).to_csv(output_path, index=False)
     else:
         raise ValueError(f"Format export tidak dikenal: {export_format}")
 
@@ -1140,6 +1157,16 @@ def preview_records(scope: str, export_format: str, limit: int = 3) -> dict[str,
             row = df.iloc[idx].to_dict()
             annotation = annotation_for_idx(idx)
             row[LABEL_COL] = annotation["expected"]
+            row["reviewer_notes"] = annotation.get("reviewer_notes", row.get("reviewer_notes", ""))
+            rows.append({k: ("" if isinstance(v, float) and pd.isna(v) else v) for k, v in row.items()})
+        preview = rows
+    elif export_format == "eval_results_reviewed":
+        rows = []
+        for idx in sorted(preview_indices):
+            row = df.iloc[idx].to_dict()
+            annotation = annotation_for_idx(idx)
+            status = row_status(idx)
+            row["reviewer_label"] = annotation["expected"] if status != "raw" else ""
             row["reviewer_notes"] = annotation.get("reviewer_notes", row.get("reviewer_notes", ""))
             rows.append({k: ("" if isinstance(v, float) and pd.isna(v) else v) for k, v in row.items()})
         preview = rows
@@ -1326,7 +1353,7 @@ def annotation_for_idx(idx: int) -> dict[str, str]:
 
     return {
         "expected": annotation.get("expected", safe_value(row.get("expected", row.get(LABEL_COL, "")))),
-        "category": annotation.get("category", safe_value(row.get("category", ""))),
+        "category": annotation.get("category", safe_value(row.get("category", row.get("mapped_rejection_category", "")))),
         "description": annotation.get(
             "description",
             safe_value(row.get("description", row.get("Response Reason", ""))),
@@ -1519,9 +1546,9 @@ def get_row_payload(idx: int) -> dict[str, object]:
         "row_number": idx + 1,
         "total": len(df),
         "status": row_status(idx),
-        "nopol": safe_value(row.get("Nopol", "-")),
+        "nopol": safe_value(row.get("Nopol") or row.get("police_number", "-")),
         "label": annotation.get("expected", safe_value(row.get(LABEL_COL, "-"))),
-        "reason": annotation.get("description", safe_value(row.get("Response Reason", row.get("description", "-")))),
+        "reason": annotation.get("description", safe_value(row.get("Response Reason", row.get("description", row.get("v_ai_reason", "-"))))),
         "url": safe_value(row.get(URL_COL, "")),
         "annotation": {
             "expected": annotation["expected"],
@@ -1753,6 +1780,7 @@ def dataset_payload() -> dict[str, object]:
         },
         "progress_file": str(DB_PATH),
         "start_index": start_index,
+        "agent_keys": sorted(df[AGENT_KEY_COL].dropna().astype(str).str.strip().unique().tolist()) if (AGENT_KEY_COL and AGENT_KEY_COL in df.columns) else (sorted(df["agent_key"].dropna().astype(str).str.strip().unique().tolist()) if "agent_key" in df.columns else []),
         "curated_categories": CURATED_CATEGORIES,
         "outputs": {
             "approved": path_label(OUTPUT_KEEP),
@@ -1906,7 +1934,8 @@ def api_action() -> Response:
     idx = min(max(int(data.get("idx", start_index)), 0), max(len(df) - 1, 0))
     annotation = data.get("annotation") if isinstance(data.get("annotation"), dict) else None
 
-    if action in {"approve", "keep", "reject", "delete"} and DATASET_MODE == "csv":
+    _requires_agent_key = DATASET_FORMAT_PRESET not in {"eval_results"}
+    if action in {"approve", "keep", "reject", "delete"} and DATASET_MODE == "csv" and _requires_agent_key:
         agent_key = (annotation or {}).get("agent_key", "").strip()
         if not agent_key:
             return jsonify({"error": "Agent key wajib dipilih sebelum approve atau reject"}), 400
@@ -2012,7 +2041,16 @@ def api_scope_indices() -> Response:
     scope = request.args.get("scope", "all")
     no_category = request.args.get("no_category", "0") == "1"
     mismatch = request.args.get("mismatch", "0") == "1"
-    effective_scope = scope if scope else "reviewed"
+    agent_key = request.args.get("agent_key", "").strip()
+    is_match = request.args.get("is_match", "").strip().lower()
+    # Review-dependent filters imply reviewed rows; data-level filters (agent_key,
+    # is_match) work across all rows. Default to the right scope when none is chosen.
+    if scope:
+        effective_scope = scope
+    elif no_category or mismatch:
+        effective_scope = "reviewed"
+    else:
+        effective_scope = "all"
     try:
         indices = sorted(indices_for_scope(effective_scope))
     except ValueError as exc:
@@ -2021,6 +2059,11 @@ def api_scope_indices() -> Response:
         indices = [idx for idx in indices if not ROW_ANNOTATIONS.get(idx, {}).get("category", "").strip()]
     if mismatch:
         indices = [idx for idx in indices if _is_mismatch(idx)]
+    ak_col = AGENT_KEY_COL if (AGENT_KEY_COL and AGENT_KEY_COL in df.columns) else ("agent_key" if "agent_key" in df.columns else "")
+    if agent_key and ak_col:
+        indices = [idx for idx in indices if str(df.iloc[idx].get(ak_col, "")).strip() == agent_key]
+    if is_match in {"true", "false"} and "is_match" in df.columns:
+        indices = [idx for idx in indices if str(df.iloc[idx].get("is_match", "")).strip().lower() == is_match]
     return jsonify({"scope": scope, "indices": indices, "count": len(indices)})
 
 

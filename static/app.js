@@ -1,7 +1,7 @@
 let currentIndex = window.APP_CONFIG.startIndex || 0;
 let stopped = false;
 let currentDatasetMode = window.APP_CONFIG?.dataset?.mode || "csv";
-let currentFormatPreset = "";
+let currentFormatPreset = window.APP_CONFIG?.dataset?.format_preset || "";
 let currentRowAgentKey = "";
 let agentTagged = false;
 let datasetLoaded = false;
@@ -16,6 +16,10 @@ let selectedCategories = [];
 let currentRowStatus = "raw";
 
 console.log(`[INIT] currentIndex=${currentIndex}, resumeIndex=${resumeIndex}`);
+
+function isNoAgentKeyPreset(preset) {
+  return preset === "data_train" || preset === "eval_results";
+}
 
 const elements = {
   progress: document.getElementById("progress"),
@@ -71,6 +75,10 @@ const elements = {
   message: document.getElementById("message"),
   buttons: Array.from(document.querySelectorAll("button[data-action]")),
   filterScope: document.getElementById("filterScope"),
+  filterAgentKeyLabel: document.getElementById("filterAgentKeyLabel"),
+  filterAgentKey: document.getElementById("filterAgentKey"),
+  filterIsMatchLabel: document.getElementById("filterIsMatchLabel"),
+  filterIsMatch: document.getElementById("filterIsMatch"),
   filterNoCategory: document.getElementById("filterNoCategory"),
   filterMismatch: document.getElementById("filterMismatch"),
   applyFilter: document.getElementById("applyFilter"),
@@ -221,17 +229,20 @@ function renderDataset(dataset) {
     }
   }
   currentDatasetMode = dataset.mode || "csv";
-  if (dataset.format_preset) {
+  if (dataset.format_preset !== undefined) {
     currentFormatPreset = dataset.format_preset;
-    elements.formatPreset.value = dataset.format_preset;
+    elements.formatPreset.value = dataset.format_preset || "";
   }
 
   const isDataTrainDataset = currentFormatPreset === "data_train";
-  document.querySelector(".finetune-bar").hidden = isDataTrainDataset;
+  const isNoAgentKey = isNoAgentKeyPreset(currentFormatPreset);
+  document.querySelector(".finetune-bar").hidden = isNoAgentKey;
   const exportOptDataTrain = document.getElementById("exportOptDataTrain");
   if (exportOptDataTrain) exportOptDataTrain.hidden = !isDataTrainDataset;
   const exportOptDataTrainJson = document.getElementById("exportOptDataTrainJson");
   if (exportOptDataTrainJson) exportOptDataTrainJson.hidden = !isDataTrainDataset;
+  const exportOptEvalResults = document.getElementById("exportOptEvalResults");
+  if (exportOptEvalResults) exportOptEvalResults.hidden = currentFormatPreset !== "eval_results";
 
   // "Tandai Agent" button loads records in finetune_json; csv uses dropdown change handler
   elements.loadAgent.hidden = currentDatasetMode !== "finetune_json";
@@ -243,7 +254,24 @@ function renderDataset(dataset) {
     fillColumnSelect(elements.agentKeyColSelect, dataset.columns, agentKeyCol);
   }
 
-  agentTagged = isDataTrainDataset
+  // is_match filter: show only for eval_results (the format that has the is_match column)
+  elements.filterIsMatchLabel.hidden = currentFormatPreset !== "eval_results";
+
+  // Agent key filter: show for data_train, populate options
+  elements.filterAgentKeyLabel.hidden = !isDataTrainDataset;
+  if (isDataTrainDataset && dataset.agent_keys && dataset.agent_keys.length > 0) {
+    const current = elements.filterAgentKey.value;
+    elements.filterAgentKey.innerHTML = '<option value="">Semua agent</option>';
+    for (const key of dataset.agent_keys) {
+      const opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = key;
+      if (key === current) opt.selected = true;
+      elements.filterAgentKey.appendChild(opt);
+    }
+  }
+
+  agentTagged = isNoAgentKey
     ? true
     : currentDatasetMode === "finetune_json"
       ? !!(dataset.finetune && dataset.finetune.agent_key)
@@ -316,7 +344,7 @@ function renderAnnotation(row) {
   const isCsv = row.dataset && row.dataset.mode === "csv";
   const showEditors = isFinetune || isCsv;
   const showCatDesc = isFinetune || (isCsv && currentFormatPreset !== "data_train");
-  const showReviewerNotes = isCsv && currentFormatPreset === "data_train";
+  const showReviewerNotes = isCsv && isNoAgentKeyPreset(currentFormatPreset);
   setFinetuneEditorsVisible(showEditors, showCatDesc, showReviewerNotes);
   if (!showEditors) return;
 
@@ -491,8 +519,10 @@ function updateFilterUi() {
     const scopeLabel = elements.filterScope.value || "Semua";
     const noCatLabel = elements.filterNoCategory.checked ? " + Kategori kosong" : "";
     const mismatchLabel = elements.filterMismatch.checked ? " + Berbeda dari label asal" : "";
+    const agentLabel = elements.filterAgentKey.value ? ` + Agent: ${elements.filterAgentKey.value}` : "";
+    const isMatchLabel = elements.filterIsMatch.value ? ` + is_match: ${elements.filterIsMatch.value}` : "";
     elements.filterStatus.textContent =
-      `Filter aktif: ${scopeLabel}${noCatLabel}${mismatchLabel} (${filterIndices.length} item, posisi ${filterPos + 1}/${filterIndices.length})`;
+      `Filter aktif: ${scopeLabel}${noCatLabel}${mismatchLabel}${agentLabel}${isMatchLabel} (${filterIndices.length} item, posisi ${filterPos + 1}/${filterIndices.length})`;
   } else {
     elements.filterStatus.textContent = "";
   }
@@ -502,8 +532,10 @@ async function applyFilter() {
   const scope = elements.filterScope.value;
   const noCategory = elements.filterNoCategory.checked;
   const mismatch = elements.filterMismatch.checked;
-  console.log(`[applyFilter] scope="${scope}" noCategory=${noCategory} mismatch=${mismatch} | currentIndex=${currentIndex} resumeIndex=${resumeIndex}`);
-  if (!scope && !noCategory && !mismatch) { clearFilter(); return; }
+  const agentKey = elements.filterAgentKey.value;
+  const isMatch = elements.filterIsMatch.value;
+  console.log(`[applyFilter] scope="${scope}" noCategory=${noCategory} mismatch=${mismatch} agentKey="${agentKey}" isMatch="${isMatch}" | currentIndex=${currentIndex} resumeIndex=${resumeIndex}`);
+  if (!scope && !noCategory && !mismatch && !agentKey && !isMatch) { clearFilter(); return; }
 
   // Snapshot the current labeling position before entering filter mode
   resumeIndex = currentIndex;
@@ -514,6 +546,8 @@ async function applyFilter() {
     const params = new URLSearchParams({ scope });
     if (noCategory) params.set("no_category", "1");
     if (mismatch) params.set("mismatch", "1");
+    if (agentKey) params.set("agent_key", agentKey);
+    if (isMatch) params.set("is_match", isMatch);
     const res = await fetch(`/api/scope/indices?${params}`);
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error || "Gagal memuat filter");
@@ -547,6 +581,8 @@ async function clearFilter() {
   filterIndices = null;
   filterPos = 0;
   elements.filterScope.value = "";
+  elements.filterAgentKey.value = "";
+  elements.filterIsMatch.value = "";
   elements.filterNoCategory.checked = false;
   elements.filterMismatch.checked = false;
   updateFilterUi();
@@ -635,12 +671,14 @@ async function switchDataset() {
   elements.message.textContent = "Memuat dataset...";
 
   try {
-    const isDataTrain = elements.formatPreset.value === "data_train";
+    const selectedPreset = elements.formatPreset.value;
+    const isDataTrain = selectedPreset === "data_train";
+    const isNoAgentKeyFormat = isNoAgentKeyPreset(selectedPreset);
     const body = {
       path: elements.datasetPath.value,
       url_col: elements.urlColumnSelect.value,
       label_col: elements.labelColumnSelect.value,
-      format_preset: elements.formatPreset.value,
+      format_preset: selectedPreset,
     };
     if (isDataTrain && elements.agentKeyColSelect.value) {
       body.agent_key_col = elements.agentKeyColSelect.value;
@@ -654,9 +692,9 @@ async function switchDataset() {
     if (!response.ok) throw new Error(payload.error || "Gagal memuat dataset");
 
     datasetLoaded = true;
-    currentFormatPreset = elements.formatPreset.value;
-    document.querySelector(".finetune-bar").hidden = isDataTrain;
-    if (isDataTrain) { agentTagged = true; updateButtonStates(); }
+    currentFormatPreset = selectedPreset;
+    document.querySelector(".finetune-bar").hidden = isNoAgentKeyFormat;
+    if (isNoAgentKeyFormat) { agentTagged = true; updateButtonStates(); }
     renderDataset(payload.dataset);
     renderRow(payload.row);
     elements.message.textContent = "";
@@ -997,8 +1035,9 @@ elements.formatPreset.addEventListener("change", () => {
 
   // Show agent key column selector only for data_train format; hide agent key picker
   const isDataTrain = !!(preset && preset.id === "data_train");
+  const isNoAgentKeyFormat = !!(preset && isNoAgentKeyPreset(preset.id));
   elements.agentKeyColLabel.hidden = !isDataTrain;
-  document.querySelector(".finetune-bar").hidden = isDataTrain;
+  document.querySelector(".finetune-bar").hidden = isNoAgentKeyFormat;
   if (isDataTrain) {
     const cols = Array.from(elements.urlColumnSelect.options).map((o) => o.value);
     if (cols.length > 0) fillColumnSelect(elements.agentKeyColSelect, cols, "agent_key");
@@ -1408,6 +1447,7 @@ loadFormatPresets()
     // continue from the current position directly.
     if (window.APP_CONFIG?.dataset?.path) {
       datasetLoaded = true;
+      renderDataset(window.APP_CONFIG.dataset);
       return loadRow(currentIndex);
     }
     // Server has no dataset — check SQLite for the most recent session and offer to resume.

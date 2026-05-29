@@ -93,6 +93,7 @@
             <option value="test_reason_json">JSON test reason</option>
             <option value="data_train_reviewed" id="exportOptDataTrain" hidden>Data Train (reviewed CSV)</option>
             <option value="data_train_json_labelling" id="exportOptDataTrainJson" hidden>Data Train (JSON siap labelling)</option>
+            <option value="eval_results_reviewed" id="exportOptEvalResults" hidden>Eval Results (reviewed CSV)</option>
             <option value="combined">Combined (test API + labelling)</option>
             <option value="raw">Raw file</option>
             <option value="raw_json">Raw JSON flat</option>
@@ -139,6 +140,20 @@
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
             <option value="skip">Skip</option>
+          </select>
+        </label>
+        <label id="filterAgentKeyLabel" hidden>
+          Agent key
+          <select id="filterAgentKey">
+            <option value="">Semua agent</option>
+          </select>
+        </label>
+        <label id="filterIsMatchLabel" hidden>
+          is_match
+          <select id="filterIsMatch">
+            <option value="">Semua</option>
+            <option value="false">Tidak match (False)</option>
+            <option value="true">Match (True)</option>
           </select>
         </label>
         <label class="filter-checkbox-label">

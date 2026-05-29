@@ -13,6 +13,11 @@
   box-sizing: border-box;
 }
 
+/* The `hidden` attribute must win over explicit `display` rules (e.g. flex bars) */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
